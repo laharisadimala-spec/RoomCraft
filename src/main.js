@@ -1,7 +1,5 @@
-import { GRID, M, FURN, FURN_CATEGORIES, FLOOR_MATERIALS, WALL_MATERIALS } from './core/constants.js';
-import {
-  snap, clamp, esc, inRect, furnHit, getFurnAABB
-} from './core/geometry.js';
+import { GRID, M, FURN, FURN_CATEGORIES, FLOOR_MATERIALS, WALL_MATERIALS, MAKEOVER_STYLES } from './core/constants.js';
+import { snap, clamp, esc, inRect, furnHit, getFurnAABB } from './core/geometry.js';
 import {
   loadHomeFromStorage, saveHomeToStorage, blankHome, template2bhk, templateExhibitionShowcase,
   makeRoom, makeFurn, makeDoor, makeWindow
@@ -21,10 +19,9 @@ import { DesignAnalyzer } from './modules/analyzer.js';
 import { MoodboardGenerator } from './modules/moodboard.js';
 import { DesignComparator } from './modules/comparison.js';
 import { PresentationController } from './modules/presentation.js';
-import { WebXRPreviewManager } from './modules/xr.js';
 import { ProjectManager } from './modules/projects.js';
 
-// DOM Elements
+// DOM References
 const $ = id => document.getElementById(id);
 const planCanvas = $('plan'), planCtx = planCanvas.getContext('2d');
 const threeCanvas = $('three');
@@ -33,20 +30,21 @@ const panel = $('panel');
 const panelTitle = $('panelTitle');
 const modalContainer = $('modalContainer');
 
-// State Variables
+// Primary Application State
 let home = loadHomeFromStorage();
 let sel = null; // { kind: 'room' | 'furn', id }
 let tool = 'select'; // 'select' | 'room' | 'door' | 'window'
-let view = '2d'; // '2d' | '3d' | 'blueprint' | 'walk' | 'presentation'
-let activeStudioTool = null; // null | 'makeover' | 'layout' | 'lighting' | 'materials' | 'floors' | 'budget' | 'analyzer' | 'moodboard' | 'compare'
+let view = '2d'; // '2d' | '3d' | 'walk'
+let planSubView = 'standard'; // 'standard' | 'blueprint'
 let currentFurnCategory = 'living';
+let activeSidebarTab = 'rooms'; // 'rooms' | 'furniture' | 'design' | 'smart'
 
 let spaceDown = false;
 let drag = null, pending = null;
 const undoStack = [], redoStack = [];
 const cam = { zoom: 0.5, x: 60, y: 60 };
 
-// Subsystem Instances
+// Subsystems
 let threeStudio = null;
 let walkthrough = null;
 let presentation = null;
@@ -61,10 +59,8 @@ let budgetPlanner = null;
 let analyzer = null;
 let moodboardGen = null;
 let comparator = null;
-let xrManager = null;
 let projectManager = null;
 
-// Initialize System Modules
 function initModules() {
   threeStudio = new ThreeStudio(threeCanvas);
   walkthrough = new WalkthroughController(threeStudio);
@@ -74,32 +70,19 @@ function initModules() {
   explodedController = new ExplodedViewController(threeStudio);
   blueprintRenderer = new BlueprintRenderer(blueprintCanvas);
 
-  lightingSim = new LightingSimulator(threeStudio, (newLighting) => {
-    commit(false);
-  });
-
-  materialStudio = new MaterialStudio(() => {
-    commit();
-  });
-
-  floorManager = new FloorManager(() => {
-    updateFloorSelector();
-    commit();
-  });
-
+  lightingSim = new LightingSimulator(threeStudio, () => commit(false));
+  materialStudio = new MaterialStudio(() => commit());
+  floorManager = new FloorManager(() => commit());
   makeoverEngine = new MakeoverEngine(null);
   layoutEngine = new LayoutEngine();
   budgetPlanner = new BudgetPlanner();
   analyzer = new DesignAnalyzer();
   moodboardGen = new MoodboardGenerator();
   comparator = new DesignComparator();
-  xrManager = new WebXRPreviewManager(threeStudio);
-  projectManager = new ProjectManager((newHome) => {
-    loadHome(newHome);
-  });
+  projectManager = new ProjectManager(newHome => loadHome(newHome));
 }
 
-// ---------------- Helpers & State Management ----------------
+// ---------------- Helpers & State Operations ----------------
 const toWorld = (sx, sy) => ({ x: (sx - cam.x) / cam.zoom, y: (sy - cam.y) / cam.zoom });
 const pt = e => { const r = planCanvas.getBoundingClientRect(); return { sx: e.clientX - r.left, sy: e.clientY - r.top }; };
 
@@ -122,7 +105,7 @@ function bounds() {
 }
 
 function setStatus(text) {
-  $('status').textContent = text;
+  $('saveStatus').textContent = text;
 }
 
 function record(before) {
@@ -136,30 +119,31 @@ function record(before) {
 function commit(rebuild3dScene = true) {
   if (sel && !selItem()) sel = null;
 
-  // Persist debounced
+  // Auto-save debounced
   projectManager.scheduleAutoSave(home, setStatus);
 
-  // Update Footer Metrics
-  updateFooterMetrics();
+  // Update Footer & Badges
+  updateFooterBadges();
 
-  // Re-render Views
+  // Re-render Active Viewport
   if (view === '2d') {
-    render2D();
+    if (planSubView === 'blueprint') {
+      blueprintRenderer.render(home, home.currentFloorId);
+    } else {
+      render2D();
+    }
   } else if (view === '3d') {
     if (rebuild3dScene) {
       threeStudio.rebuild(home, { isolateFloorId: floorManager.isolatedFloorId });
     }
-  } else if (view === 'blueprint') {
-    blueprintRenderer.render(home, home.currentFloorId);
   }
 
-  // Update Panel & Lists
+  // Render context-dependent sidebar contents
   renderSidebarRoomList();
-  if (activeStudioTool) {
-    renderStudioPanel(activeStudioTool);
-  } else {
-    renderPropertiesPanel();
-  }
+  if (activeSidebarTab === 'smart') renderSmartToolsTab();
+
+  // Render Contextual Properties Inspector
+  renderContextualProperties();
 }
 
 function doUndo() {
@@ -167,9 +151,8 @@ function doUndo() {
     redoStack.push(JSON.stringify(home));
     home = JSON.parse(undoStack.pop());
     commit();
-    updateFloorSelector();
     $('name').value = home.name;
-    setStatus('Undo performed');
+    setStatus('✓ Undo');
   }
 }
 
@@ -178,21 +161,17 @@ function doRedo() {
     undoStack.push(JSON.stringify(home));
     home = JSON.parse(redoStack.pop());
     commit();
-    updateFloorSelector();
     $('name').value = home.name;
-    setStatus('Redo performed');
+    setStatus('✓ Redo');
   }
 }
 
 function loadHome(newHome) {
-  const before = JSON.stringify(home);
   home = newHome;
   sel = null;
-  activeStudioTool = null;
   undoStack.length = 0;
   redoStack.length = 0;
   $('name').value = home.name || 'My home';
-  updateFloorSelector();
   commit();
   fit2D();
   if (threeStudio) {
@@ -223,7 +202,7 @@ function render2D() {
   const x0 = -cam.x / z, y0 = -cam.y / z;
   const x1 = x0 + W / z, y1 = y0 + H / z;
 
-  // Background Grid (100cm / 1m major, 50cm minor)
+  // 1-meter Grid lines
   planCtx.beginPath();
   planCtx.strokeStyle = '#ebe5d8';
   planCtx.lineWidth = 1 / z;
@@ -237,7 +216,6 @@ function render2D() {
   }
   planCtx.stroke();
 
-  // Active Floor items
   const activeRooms = home.rooms.filter(r => r.floorId === home.currentFloorId);
   const activeFurn = home.furn.filter(f => f.floorId === home.currentFloorId);
 
@@ -254,25 +232,21 @@ function render2D() {
     planCtx.rotate((f.rot || 0) * Math.PI / 180);
 
     if (f.type === 'door') {
-      // Architectural Door
       planCtx.strokeStyle = '#8a6d4b';
       planCtx.lineWidth = 2 / z;
       planCtx.strokeRect(-f.w / 2, -4, f.w, 8);
-      // Swing arc
       planCtx.setLineDash([4 / z, 4 / z]);
       planCtx.beginPath();
       planCtx.arc(-f.w / 2, 0, f.w, 0, Math.PI / 2);
       planCtx.stroke();
       planCtx.setLineDash([]);
     } else if (f.type === 'window') {
-      // Architectural Window
       planCtx.fillStyle = '#bde0fe';
       planCtx.strokeStyle = '#2a5a8a';
       planCtx.lineWidth = 2 / z;
       planCtx.fillRect(-f.w / 2, -6, f.w, 12);
       planCtx.strokeRect(-f.w / 2, -6, f.w, 12);
     } else if (f.type === 'stairs') {
-      // Staircase steps
       planCtx.fillStyle = f.color || '#9e8060';
       planCtx.fillRect(-f.w / 2, -f.d / 2, f.w, f.d);
       planCtx.strokeStyle = '#4a3b2c';
@@ -287,14 +261,12 @@ function render2D() {
         planCtx.stroke();
       }
     } else {
-      // Standard Furniture Box with drop shadow and outline
       planCtx.fillStyle = f.color || '#9c7a52';
       planCtx.strokeStyle = '#524332';
       planCtx.lineWidth = 1.5 / z;
       planCtx.fillRect(-f.w / 2, -f.d / 2, f.w, f.d);
       planCtx.strokeRect(-f.w / 2, -f.d / 2, f.w, f.d);
 
-      // Label inside furniture if zoomed in enough
       if (z > 0.35 && f.w > 40) {
         planCtx.fillStyle = '#ffffff';
         planCtx.textAlign = 'center';
@@ -306,18 +278,16 @@ function render2D() {
     planCtx.restore();
   }
 
-  // 3. Draw Room Walls & Room Area Labels
+  // 3. Draw Room Walls & Room Labels
   for (const r of activeRooms) {
     planCtx.strokeStyle = r.wall || '#f5f1ea';
     planCtx.lineWidth = 14;
     planCtx.strokeRect(r.x, r.y, r.w, r.h);
 
-    // Inner line definition
     planCtx.strokeStyle = '#cfc5b4';
     planCtx.lineWidth = 1 / z;
     planCtx.strokeRect(r.x, r.y, r.w, r.h);
 
-    // Room Label
     planCtx.fillStyle = '#2b2823';
     planCtx.textAlign = 'center';
     planCtx.font = `700 ${15 / z}px ui-serif, Georgia, serif`;
@@ -332,7 +302,7 @@ function render2D() {
     );
   }
 
-  // 4. Draw Selected Item Highlight Ring
+  // 4. Selection Highlight
   const it = selItem();
   if (it) {
     planCtx.strokeStyle = '#8a6d4b';
@@ -350,7 +320,7 @@ function render2D() {
     planCtx.setLineDash([]);
   }
 
-  // 5. Draw in-progress room creation rectangle
+  // 5. In-progress Room Drawing Box
   if (drag?.kind === 'draw') {
     const x = Math.min(drag.x0, drag.x1), y = Math.min(drag.y0, drag.y1);
     const w = Math.abs(drag.x1 - drag.x0), h = Math.abs(drag.y1 - drag.y0);
@@ -424,7 +394,6 @@ planCanvas.addEventListener('pointerdown', e => {
     return;
   }
 
-  // Check Furniture Hit on active floor
   const activeFurn = home.furn.filter(f => f.floorId === home.currentFloorId);
   const f = [...activeFurn].reverse().find(f => furnHit(f, p));
 
@@ -432,7 +401,6 @@ planCanvas.addEventListener('pointerdown', e => {
     sel = { kind: 'furn', id: f.id };
     drag = { kind: 'furn', id: f.id, ox: p.x - f.x, oy: p.y - f.y };
   } else {
-    // Check Room Hit on active floor
     const activeRooms = home.rooms.filter(r => r.floorId === home.currentFloorId);
     const r = [...activeRooms].reverse().find(r => inRect(r, p));
 
@@ -446,9 +414,8 @@ planCanvas.addEventListener('pointerdown', e => {
     }
   }
 
-  activeStudioTool = null; // restore properties panel on click
   render2D();
-  renderPropertiesPanel();
+  renderContextualProperties();
   renderSidebarRoomList();
 });
 
@@ -520,96 +487,113 @@ planCanvas.addEventListener('wheel', e => {
   e.preventDefault();
   const { sx, sy } = pt(e);
   const before = toWorld(sx, sy);
-  cam.zoom = clamp(cam.zoom * (e.deltaY < 0 ? 1.12 : 0.88), 0.1, 3.5);
+  cam.zoom = clamp(cam.zoom * (e.deltaY < 0 ? 1.12 : 0.88), 0.15, 3.5);
   cam.x = sx - before.x * cam.zoom;
   cam.y = sy - before.y * cam.zoom;
   render2D();
 }, { passive: false });
 
-// ---------------- Multi-Floor Selector UI ----------------
-function updateFloorSelector() {
-  const select = $('activeFloorSelect');
-  select.innerHTML = (home.floors || []).map(f =>
-    `<option value="${f.id}" ${f.id === home.currentFloorId ? 'selected' : ''}>${esc(f.name)}</option>`
-  ).join('');
-
-  const activeFloor = home.floors.find(f => f.id === home.currentFloorId) || home.floors[0];
-  $('floorBadge').textContent = activeFloor ? activeFloor.name : 'Ground Floor';
-}
-
-$('activeFloorSelect').addEventListener('change', e => {
-  floorManager.setActiveFloor(home, e.target.value);
-  $('floorBadge').textContent = floorManager.getActiveFloor(home).name;
-  sel = null;
-  commit();
-  fit2D();
-});
-
-$('quickAddFloor').onclick = () => {
-  floorManager.addFloor(home);
-  updateFloorSelector();
-  commit();
-};
-
-// ---------------- View Mode Switcher ----------------
+// ---------------- Primary Workspace Mode Switcher ----------------
 function setView(newView) {
   view = newView;
 
-  // Toggle active segment buttons
   $('mode2').classList.toggle('on', view === '2d');
   $('mode3').classList.toggle('on', view === '3d');
-  $('modeBlueprint').classList.toggle('on', view === 'blueprint');
   $('modeWalk').classList.toggle('on', view === 'walk');
-  $('modePres').classList.toggle('on', view === 'presentation');
 
-  // Toggle canvases
-  planCanvas.hidden = view !== '2d';
-  threeCanvas.hidden = view === '2d' || view === 'blueprint';
-  blueprintCanvas.hidden = view !== 'blueprint';
+  // Viewport elements
+  planCanvas.hidden = view !== '2d' || planSubView === 'blueprint';
+  blueprintCanvas.hidden = view !== '2d' || planSubView !== 'blueprint';
+  threeCanvas.hidden = view === '2d';
 
-  // Toggle overlays
-  $('walkHud').hidden = view !== 'walk';
-  $('presHud').hidden = view !== 'presentation';
+  // 2D subview pill only visible in 2D mode
+  $('planViewToggle').hidden = view !== '2d';
+
+  // 3D Quick Dock only visible in 3D mode
+  $('dock3D').hidden = view !== '3d';
   $('explodedOverlay').hidden = true;
+
+  // Walkthrough HUD
+  $('walkHud').hidden = view !== 'walk';
+  $('presHud').hidden = true;
 
   if (view === '2d') {
     if (walkthrough.isActive) walkthrough.stop();
     if (presentation.isActive) presentation.stop();
-    fit2D();
+    if (planSubView === 'blueprint') {
+      blueprintRenderer.render(home, home.currentFloorId);
+    } else {
+      fit2D();
+    }
   } else if (view === '3d') {
     if (walkthrough.isActive) walkthrough.stop();
     if (presentation.isActive) presentation.stop();
     threeStudio.resize();
     threeStudio.rebuild(home, { isolateFloorId: floorManager.isolatedFloorId });
     threeStudio.frameScene(home);
-  } else if (view === 'blueprint') {
-    if (walkthrough.isActive) walkthrough.stop();
-    if (presentation.isActive) presentation.stop();
-    blueprintRenderer.render(home, home.currentFloorId);
   } else if (view === 'walk') {
     if (presentation.isActive) presentation.stop();
     threeStudio.resize();
     threeStudio.rebuild(home, { isolateFloorId: home.currentFloorId });
     walkthrough.start(home, () => setView('3d'));
     $('walkCurrentRoom').textContent = walkthrough.getCurrentRoomName();
-  } else if (view === 'presentation') {
-    if (walkthrough.isActive) walkthrough.stop();
-    threeStudio.resize();
-    threeStudio.rebuild(home, { isolateFloorId: null });
-    presentation.start(home, (roomTarget) => {
-      $('presRoomName').textContent = roomTarget.name;
-      $('presRoomMeta').textContent = `Area: ${roomTarget.areaM2} m² · Dimensions: ${roomTarget.dimensions}`;
-    });
   }
+
+  renderContextualProperties();
 }
 
 $('mode2').onclick = () => setView('2d');
 $('mode3').onclick = () => setView('3d');
-$('modeBlueprint').onclick = () => setView('blueprint');
 $('modeWalk').onclick = () => setView('walk');
-$('modePres').onclick = () => setView('presentation');
 
-// Walkthrough HUD Actions
+// 2D Blueprint Subview Pill Toggle
+$('btnPlanStandard').onclick = () => {
+  planSubView = 'standard';
+  $('btnPlanStandard').classList.add('on');
+  $('btnPlanBlueprint').classList.remove('on');
+  planCanvas.hidden = false;
+  blueprintCanvas.hidden = true;
+  fit2D();
+};
+$('btnPlanBlueprint').onclick = () => {
+  planSubView = 'blueprint';
+  $('btnPlanStandard').classList.remove('on');
+  $('btnPlanBlueprint').classList.add('on');
+  planCanvas.hidden = true;
+  blueprintCanvas.hidden = false;
+  blueprintRenderer.render(home, home.currentFloorId);
+};
+
+// 3D Quick Dock Actions
+$('dockLightingPreset').addEventListener('change', e => {
+  lightingSim.setPreset(e.target.value, home);
+  commit(false);
+});
+$('btnDockExploded').onclick = () => {
+  $('explodedOverlay').hidden = !$('explodedOverlay').hidden;
+  if (!$('explodedOverlay').hidden) {
+    $('explodedSlider').value = 0;
+    $('explodedVal').textContent = '0%';
+    explodedController.setProgress(0);
+  }
+};
+$('btnDockResetCam').onclick = () => {
+  threeStudio.frameScene(home);
+};
+
+// Exploded Slider Actions
+$('explodedSlider').addEventListener('input', e => {
+  const val = parseInt(e.target.value, 10);
+  $('explodedVal').textContent = `${val}%`;
+  explodedController.setProgress(val / 100);
+});
+$('btnExplodedToggle').onclick = () => explodedController.toggleExplosion();
+$('btnExplodedClose').onclick = () => {
+  explodedController.setProgress(0);
+  $('explodedOverlay').hidden = true;
+};
+
+// Walkthrough Actions
 $('walkExit').onclick = () => setView('3d');
 $('walkReset').onclick = () => walkthrough.resetPosition();
 $('walkNextRoom').onclick = () => {
@@ -630,8 +614,28 @@ $('walkTourToggle').onclick = () => {
   }
 };
 
-// Presentation HUD Actions
-$('presExit').onclick = () => setView('3d');
+// Presentation Preview Mode
+$('btnPreview').onclick = () => {
+  if (walkthrough.isActive) walkthrough.stop();
+  threeCanvas.hidden = false;
+  planCanvas.hidden = true;
+  blueprintCanvas.hidden = true;
+  $('walkHud').hidden = true;
+  $('dock3D').hidden = true;
+  $('presHud').hidden = false;
+
+  threeStudio.resize();
+  threeStudio.rebuild(home, { isolateFloorId: null });
+  presentation.start(home, roomTarget => {
+    $('presRoomName').textContent = roomTarget.name;
+    $('presRoomMeta').textContent = `Area: ${roomTarget.areaM2} m² · Dimensions: ${roomTarget.dimensions}`;
+  });
+};
+$('presExit').onclick = () => {
+  presentation.stop();
+  $('presHud').hidden = true;
+  setView('3d');
+};
 $('presNext').onclick = () => presentation.nextRoom();
 $('presPrev').onclick = () => presentation.prevRoom();
 $('presPlayToggle').onclick = () => {
@@ -639,40 +643,33 @@ $('presPlayToggle').onclick = () => {
   $('presPlayToggle').textContent = isPlaying ? '⏸ Pause Tour' : '▶ Play Tour';
 };
 
-// Exploded View Slider Actions
-$('explodedSlider').addEventListener('input', e => {
-  const val = parseInt(e.target.value, 10);
-  $('explodedVal').textContent = `${val}%`;
-  explodedController.setProgress(val / 100);
-});
-$('btnExplodedToggle').onclick = () => explodedController.toggleExplosion();
-$('btnExplodedClose').onclick = () => {
-  explodedController.setProgress(0);
-  $('explodedOverlay').hidden = true;
-};
+// ---------------- Sidebar Tabs (4 Primary Sections) ----------------
+document.querySelectorAll('.sb-tab').forEach(tabBtn => {
+  tabBtn.addEventListener('click', () => {
+    document.querySelectorAll('.sb-tab').forEach(b => b.classList.remove('on'));
+    tabBtn.classList.add('on');
+    activeSidebarTab = tabBtn.dataset.sbtab;
 
-// ---------------- Drafting Tools & Furniture Palette ----------------
+    $('tabRooms').hidden = activeSidebarTab !== 'rooms';
+    $('tabFurniture').hidden = activeSidebarTab !== 'furniture';
+    $('tabDesign').hidden = activeSidebarTab !== 'design';
+    $('tabSmart').hidden = activeSidebarTab !== 'smart';
+
+    if (activeSidebarTab === 'furniture') {
+      renderFurnitureTab();
+    } else if (activeSidebarTab === 'design') {
+      renderDesignStylesTab();
+    } else if (activeSidebarTab === 'smart') {
+      renderSmartToolsTab();
+    }
+  });
+});
+
+// Tab 1: Rooms & Walls
 function setTool(t) {
   tool = t;
   document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
   planCanvas.style.cursor = t === 'room' ? 'crosshair' : 'default';
-}
-
-function renderFurnCategoryTabs() {
-  $('furnCatTabs').innerHTML = FURN_CATEGORIES.map(cat =>
-    `<button class="furn-cat-tab ${cat.id === currentFurnCategory ? 'active' : ''}" data-cat="${cat.id}">${cat.label}</button>`
-  ).join('');
-}
-
-function renderFurnGrid() {
-  const filtered = Object.entries(FURN).filter(([k, v]) => v.category === currentFurnCategory);
-  $('furnList').innerHTML = filtered.map(([k, v]) => `
-    <button class="furn-card" data-add="${k}">
-      <span class="title">${v.label}</span>
-      <span class="dim">${v.w}×${v.d} cm</span>
-      <span class="price">₹${(v.price || 15000).toLocaleString('en-IN')}</span>
-    </button>
-  `).join('');
 }
 
 function renderSidebarRoomList() {
@@ -682,7 +679,27 @@ function renderSidebarRoomList() {
       <span><b>${esc(r.name)}</b></span>
       <small>${(r.w / 100).toFixed(1)}×${(r.h / 100).toFixed(1)} m · ${(r.w * r.h / 10000).toFixed(1)} m²</small>
     </button>`
-  ).join('') || '<p class="empty">No rooms on this floor yet. Click "Draw Room" or load a template.</p>';
+  ).join('') || '<p class="section-desc">No rooms yet on this level. Click "Draw Room" or load a starter template.</p>';
+}
+
+$('tplShowcase').onclick = () => loadHome(templateExhibitionShowcase());
+$('tpl2bhk').onclick = () => loadHome(template2bhk());
+$('newBlank').onclick = () => loadHome(blankHome());
+
+// Tab 2: Furniture Library
+function renderFurnitureTab() {
+  $('furnCatTabs').innerHTML = FURN_CATEGORIES.map(cat =>
+    `<button class="furn-pill ${cat.id === currentFurnCategory ? 'active' : ''}" data-cat="${cat.id}">${cat.label}</button>`
+  ).join('');
+
+  const filtered = Object.entries(FURN).filter(([k, v]) => v.category === currentFurnCategory);
+  $('furnList').innerHTML = filtered.map(([k, v]) => `
+    <button class="furn-card" data-add="${k}">
+      <span class="title">${v.label}</span>
+      <span class="dim">${v.w}×${v.d} cm</span>
+      <span class="price">₹${(v.price || 15000).toLocaleString('en-IN')}</span>
+    </button>
+  `).join('');
 }
 
 function addFurn(type) {
@@ -699,6 +716,348 @@ function addFurn(type) {
   record(before);
   commit();
 }
+
+// Tab 3: Design & Materials (Combined Design Studio)
+function renderDesignStylesTab() {
+  const styles = makeoverEngine.getStyles();
+  const targetRoom = (sel?.kind === 'room' && selItem()) || home.rooms[0];
+
+  $('designStylesGrid').innerHTML = styles.map(s => `
+    <div class="style-card" data-style="${s.id}">
+      <span class="badge">${s.badge}</span>
+      <h4>${s.name}</h4>
+      <div class="palette-dots">
+        ${s.palette.map(hex => `<span class="palette-dot" style="background:${hex};"></span>`).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  $('designStylesGrid').querySelectorAll('.style-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const styleId = card.dataset.style;
+      const res = makeoverEngine.generateMakeover(targetRoom, styleId, home);
+      if (res) {
+        const before = JSON.stringify(home);
+        makeoverEngine.applyMakeover(res, home);
+        record(before);
+        commit();
+        setStatus(`Applied ${res.style.name} Makeover`);
+      }
+    });
+  });
+}
+
+$('btnViewMoodboard').onclick = () => {
+  const targetRoom = (sel?.kind === 'room' && selItem()) || home.rooms[0];
+  if (!targetRoom) return alert('Please create or select a room first.');
+  const mb = moodboardGen.generateMoodboard(targetRoom, home);
+
+  modalContainer.hidden = false;
+  modalContainer.className = 'modal-backdrop';
+  modalContainer.innerHTML = `
+    <div class="modal-window">
+      <div class="modal-header">
+        <h3>${esc(mb.roomName)} — ${mb.themeName} Moodboard</h3>
+        <button id="modalClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:12.5px; color:var(--muted); font-style:italic; margin-bottom:14px;">"${mb.themeTagline}"</p>
+        
+        <h4 style="margin-bottom:6px;">Color Palette</h4>
+        <div style="display:flex; gap:6px; margin-bottom:16px;">
+          ${mb.palette.map(p => `
+            <div style="flex:1; text-align:center;">
+              <div style="height:36px; border-radius:6px; background:${p.hex}; border:1px solid #ddd;"></div>
+              <div style="font-size:10px; font-weight:600; margin-top:3px;">${p.hex.toUpperCase()}</div>
+              <div style="font-size:9px; color:var(--muted);">${p.label}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="row2" style="margin-bottom:14px;">
+          <div style="background:#f7f4ee; padding:10px; border-radius:8px;">
+            <b>Floor Surface:</b> ${mb.floorMaterial.label}
+          </div>
+          <div style="background:#f7f4ee; padding:10px; border-radius:8px;">
+            <b>Wall Finish:</b> ${mb.wallMaterial.label}
+          </div>
+        </div>
+
+        <h4>Inventory &amp; Fixtures (${mb.furnitureList.length} items)</h4>
+        <div style="max-height:140px; overflow-y:auto; border:1px solid var(--line); border-radius:6px; background:#fff; margin-bottom:14px;">
+          ${mb.furnitureList.map(f => `
+            <div style="display:flex; justify-content:space-between; padding:5px 8px; border-bottom:1px solid var(--line); font-size:11.5px;">
+              <span>${f.label}</span>
+              <span style="color:var(--muted);">${f.dimensions}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnDlMoodboard" class="btn-primary">Download Moodboard Image (PNG)</button>
+        <button id="btnCloseMb">Close</button>
+      </div>
+    </div>
+  `;
+
+  $('modalClose').onclick = () => { modalContainer.hidden = true; };
+  $('btnCloseMb').onclick = () => { modalContainer.hidden = true; };
+  $('btnDlMoodboard').onclick = () => {
+    const png = moodboardGen.exportMoodboardCanvas(mb);
+    const a = document.createElement('a');
+    a.download = `${targetRoom.name}_Moodboard.png`;
+    a.href = png;
+    a.click();
+  };
+};
+
+// Tab 4: Smart Tools (Combined Layout Optimizer & Quality Audit)
+function renderSmartToolsTab() {
+  const targetRoom = (sel?.kind === 'room' && selItem()) || home.rooms[0];
+  if (!targetRoom) {
+    $('smartToolsContainer').innerHTML = '<p class="section-desc">Create or select a room to evaluate layout and design quality.</p>';
+    return;
+  }
+
+  const layouts = layoutEngine.generateLayouts(targetRoom, home.furn);
+  const audit = analyzer.analyze(home, targetRoom.id);
+
+  $('smartToolsContainer').innerHTML = `
+    <div style="background:#f4eee2; padding:10px; border-radius:8px; margin-bottom:12px;">
+      <span style="font-size:10.5px; font-weight:700; color:var(--wood); text-transform:uppercase;">Evaluated Room:</span>
+      <h3 style="margin:2px 0; font-size:15px;">${esc(targetRoom.name)}</h3>
+      <span style="font-size:11.5px; color:var(--muted);">${(targetRoom.w * targetRoom.h / 10000).toFixed(1)} m² · Design Score: <b>${audit.overallScore}/100</b> (${audit.rating})</span>
+    </div>
+
+    <h4>Layout Optimization Suggestions</h4>
+    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;">
+      ${layouts.map((l, idx) => `
+        <div class="style-card" style="padding:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+            <span class="badge">${l.badge}</span>
+            <b style="color:var(--wood); font-size:12px;">Score: ${l.score}/100</b>
+          </div>
+          <div style="font-weight:600; font-size:12px;">${l.title}</div>
+          <div style="font-size:11px; color:var(--muted); margin:3px 0 6px;">${l.rationale.slice(0, 95)}...</div>
+          <button class="btn-primary btn-apply-smart-layout" data-idx="${idx}" style="font-size:11px; padding:3px 8px; width:100%;">Apply This Layout</button>
+        </div>
+      `).join('')}
+    </div>
+
+    <h4>Design Quality Audit Breakdown</h4>
+    <div style="margin-bottom:12px;">
+      ${audit.categories.map(c => `
+        <div class="score-bar-group">
+          <div class="score-bar-label">
+            <span>${c.name}</span>
+            <b>${c.score}/100</b>
+          </div>
+          <div class="score-track">
+            <div class="score-fill" style="width:${c.score}%; background:${c.score >= 80 ? 'var(--accent-green)' : c.score >= 60 ? 'var(--accent-gold)' : 'var(--accent-red)'};"></div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    ${audit.warnings.length > 0 ? `
+      <h4>Detected Issues (${audit.warnings.length})</h4>
+      <div style="margin-bottom:10px;">
+        ${audit.warnings.map(w => `<div class="warning-pill ${w.severity}">${w.message}</div>`).join('')}
+      </div>
+    ` : '<div class="warning-pill tip">✓ No collisions or clearance violations detected!</div>'}
+  `;
+
+  $('smartToolsContainer').querySelectorAll('.btn-apply-smart-layout').forEach(b => {
+    b.addEventListener('click', () => {
+      const idx = parseInt(b.dataset.idx, 10);
+      const chosen = layouts[idx];
+      const before = JSON.stringify(home);
+      const itemMap = new Map(chosen.items.map(it => [it.id, it]));
+      home.furn.forEach(f => {
+        if (itemMap.has(f.id)) Object.assign(f, itemMap.get(f.id));
+      });
+      record(before);
+      commit();
+      setStatus(`Applied ${chosen.title}`);
+    });
+  });
+}
+
+// ---------------- Contextual Right Sidebar Inspector ----------------
+function renderContextualProperties() {
+  const it = selItem();
+
+  if (it) {
+    if (sel.kind === 'room') {
+      panelTitle.textContent = 'Room Properties';
+      const floorMat = FLOOR_MATERIALS[it.floorMaterial] || FLOOR_MATERIALS.oakWood;
+      const wallMat = WALL_MATERIALS[it.wallMaterial] || WALL_MATERIALS.whitePaint;
+
+      panel.innerHTML = `
+        <label>Room Name<input data-k="name" value="${esc(it.name)}"></label>
+        <div class="row2">
+          <label>Width (cm)<input type="number" step="10" min="80" data-k="w" value="${it.w}"></label>
+          <label>Length (cm)<input type="number" step="10" min="80" data-k="h" value="${it.h}"></label>
+        </div>
+        <label>Wall Height (cm)<input type="number" step="10" min="220" data-k="wallH" value="${it.wallH || 280}"></label>
+        
+        <label>Flooring Material
+          <select data-k="floorMaterial">
+            ${materialStudio.getFloorMaterials().map(m => `<option value="${m.id}" ${m.id === it.floorMaterial ? 'selected' : ''}>${m.label}</option>`).join('')}
+          </select>
+        </label>
+        <label>Floor Tint Color<input type="color" data-k="floor" value="${it.floor || floorMat.color}"></label>
+
+        <label>Wall Finish
+          <select data-k="wallMaterial">
+            ${materialStudio.getWallMaterials().map(m => `<option value="${m.id}" ${m.id === it.wallMaterial ? 'selected' : ''}>${m.label}</option>`).join('')}
+          </select>
+        </label>
+        <label>Wall Tint Color<input type="color" data-k="wall" value="${it.wall || wallMat.color}"></label>
+
+        <div style="background:#f5efe6; padding:8px 10px; border-radius:6px; margin:12px 0; font-size:11.5px; font-weight:600;">
+          Area: ${(it.w * it.h / 10000).toFixed(2)} m² [${Math.round((it.w * it.h / 10000) * 10.7639)} sq.ft]
+        </div>
+
+        <div class="btns">
+          <button data-act="dup">Duplicate</button>
+          <button class="danger" data-act="del">Delete</button>
+        </div>
+      `;
+    } else {
+      panelTitle.textContent = 'Furniture Properties';
+      panel.innerHTML = `
+        <h4 style="margin:0 0 8px; font-size:13px; text-transform:none; color:var(--ink);">${esc(it.label || it.type)}</h4>
+        <div class="row2">
+          <label>Width (cm)<input type="number" step="5" min="10" data-k="w" value="${it.w}"></label>
+          <label>Depth (cm)<input type="number" step="5" min="10" data-k="d" value="${it.d}"></label>
+        </div>
+        <div class="row2">
+          <label>Height (cm)<input type="number" step="5" min="10" data-k="h" value="${it.h}"></label>
+          <label>Rotation (°)<input type="number" step="90" data-k="rot" value="${it.rot || 0}"></label>
+        </div>
+        <label>Color Tint<input type="color" data-k="color" value="${it.color || '#9c7a52'}"></label>
+        <label>Estimated Price (₹)<input type="number" step="1000" data-k="price" value="${it.price || 15000}"></label>
+
+        <div class="btns">
+          <button data-act="rot">Rotate 90°</button>
+          <button data-act="dup">Duplicate</button>
+          <button class="danger" data-act="del">Delete</button>
+        </div>
+      `;
+    }
+  } else {
+    // Contextual summary when nothing is selected
+    if (view === '3d') {
+      panelTitle.textContent = '3D Studio Environment';
+      const lighting = home.lighting || {};
+      panel.innerHTML = `
+        <p class="section-desc">Customize natural solar lighting, shadows, and ambiance:</p>
+        
+        <label>Day / Night Solar Time</label>
+        <select id="pnlSelectLighting">
+          <option value="afternoon" ${lighting.preset === 'afternoon' ? 'selected' : ''}>Afternoon Daylight (1:30 PM)</option>
+          <option value="morning" ${lighting.preset === 'morning' ? 'selected' : ''}>Morning Golden Hour (8:30 AM)</option>
+          <option value="sunset" ${lighting.preset === 'sunset' ? 'selected' : ''}>Sunset Dusk (6:15 PM)</option>
+          <option value="night" ${lighting.preset === 'night' ? 'selected' : ''}>Night Ambiance (9:45 PM)</option>
+        </select>
+
+        <label>Sunlight Intensity (${(lighting.sunIntensity ?? 2.1).toFixed(1)}x)
+          <input type="range" id="pnlSunInt" min="0" max="35" value="${Math.round((lighting.sunIntensity ?? 2.1) * 10)}">
+        </label>
+
+        <label>Color Warmth Preset</label>
+        <div class="row3">
+          <button class="btn-subtle btn-temp ${lighting.colorTemp === 'warm' ? 'on' : ''}" data-temp="warm">Warm</button>
+          <button class="btn-subtle btn-temp ${lighting.colorTemp === 'neutral' ? 'on' : ''}" data-temp="neutral">Neutral</button>
+          <button class="btn-subtle btn-temp ${lighting.colorTemp === 'cool' ? 'on' : ''}" data-temp="cool">Cool</button>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px;">
+          <label style="margin:0;">Soft Shadows</label>
+          <input type="checkbox" id="pnlChkShadow" ${lighting.shadows !== false ? 'checked' : ''} style="width:18px; height:18px;">
+        </div>
+
+        <div style="margin-top:20px; padding:10px; background:#f4eee2; border-radius:8px;">
+          <span style="font-size:11.5px; font-weight:600; color:var(--wood);">💡 Tip:</span>
+          <p style="font-size:11px; color:var(--muted); margin-top:3px;">Click on any room or furniture piece in 3D to edit finishes and dimensions directly.</p>
+        </div>
+      `;
+
+      $('pnlSelectLighting')?.addEventListener('change', e => {
+        lightingSim.setPreset(e.target.value, home);
+        $('dockLightingPreset').value = e.target.value;
+        commit(false);
+      });
+      $('pnlSunInt')?.addEventListener('input', e => {
+        lightingSim.setParam('sunIntensity', parseInt(e.target.value, 10) / 10, home);
+      });
+      panel.querySelectorAll('.btn-temp').forEach(b => {
+        b.addEventListener('click', () => {
+          lightingSim.setParam('colorTemp', b.dataset.temp, home);
+          commit(false);
+          renderContextualProperties();
+        });
+      });
+      $('pnlChkShadow')?.addEventListener('change', e => {
+        lightingSim.setParam('shadows', e.target.checked, home);
+      });
+    } else {
+      panelTitle.textContent = 'Floor Overview';
+      const activeRooms = home.rooms.filter(r => r.floorId === home.currentFloorId);
+      const totalArea = activeRooms.reduce((s, r) => s + (r.w * r.h) / 10000, 0);
+
+      panel.innerHTML = `
+        <div style="background:#f5efe6; padding:12px; border-radius:8px; margin-bottom:12px;">
+          <div style="font-size:11px; font-weight:700; color:var(--wood); text-transform:uppercase;">Current Level:</div>
+          <h3 style="margin:3px 0 6px;">${esc(floorManager.getActiveFloor(home).name)}</h3>
+          <div style="font-size:12px; color:var(--ink-soft);">
+            ${activeRooms.length} Rooms · ${totalArea.toFixed(1)} m² [${Math.round(totalArea * 10.7639)} sq.ft]
+          </div>
+        </div>
+
+        <p class="section-desc">Click any room or furniture piece on the floor plan to inspect its dimensions, change materials, rotate, or duplicate.</p>
+
+        <div style="margin-top:16px; display:flex; flex-direction:column; gap:6px;">
+          <button id="pnlQuickAddRoom" class="btn-subtle">+ Draw New Room</button>
+          <button id="pnlOpenSmart" class="btn-subtle">📐 Optimize Layouts</button>
+        </div>
+      `;
+
+      $('pnlQuickAddRoom')?.addEventListener('click', () => setTool('room'));
+      $('pnlOpenSmart')?.addEventListener('click', () => {
+        document.querySelector('[data-sbtab="smart"]').click();
+      });
+    }
+  }
+}
+
+panel.addEventListener('change', e => {
+  const k = e.target.dataset.k;
+  const it = selItem();
+  if (!k || !it) return;
+
+  const before = JSON.stringify(home);
+  let v = e.target.value;
+
+  if (e.target.type === 'number') {
+    v = parseFloat(v);
+    if (!Number.isFinite(v)) return;
+    if (['w', 'h', 'd'].includes(k)) v = Math.max(10, v);
+    if (k === 'rot') v = ((v % 360) + 360) % 360;
+  }
+
+  it[k] = v;
+  record(before);
+  commit();
+});
+
+panel.addEventListener('click', e => {
+  const a = e.target.dataset.act;
+  if (a === 'dup') duplicateSel();
+  else if (a === 'del') removeSel();
+  else if (a === 'rot') rotateSel();
+});
 
 function duplicateSel() {
   const it = selItem();
@@ -741,1014 +1100,260 @@ function rotateSel() {
   commit();
 }
 
-// ---------------- Contextual Properties Inspector ----------------
-function renderPropertiesPanel() {
-  panelTitle.textContent = 'Properties';
-  const it = selItem();
-  if (!it) {
-    panel.innerHTML = `
-      <h3>Nothing Selected</h3>
-      <p class="empty" style="margin-top:8px;">Click a room or furniture piece on the floor plan to inspect and modify dimensions, colors, or materials.</p>
-      <div style="margin-top:20px; display:flex; flex-direction:column; gap:8px;">
-        <button id="pnlOpenMakeover" class="btn-studio">✨ Launch Smart Makeover</button>
-        <button id="pnlOpenLayout" class="btn-studio">📐 Optimize Furniture Layout</button>
-        <button id="pnlOpenQuality" class="btn-studio">📊 Check Design Quality Score</button>
-      </div>
-    `;
-
-    $('pnlOpenMakeover')?.addEventListener('click', () => openStudioTool('makeover'));
-    $('pnlOpenLayout')?.addEventListener('click', () => openStudioTool('layout'));
-    $('pnlOpenQuality')?.addEventListener('click', () => openStudioTool('analyzer'));
-    return;
-  }
-
-  if (sel.kind === 'room') {
-    const floorMat = FLOOR_MATERIALS[it.floorMaterial] || FLOOR_MATERIALS.oakWood;
-    const wallMat = WALL_MATERIALS[it.wallMaterial] || WALL_MATERIALS.whitePaint;
-
-    panel.innerHTML = `
-      <label>Room Name<input data-k="name" value="${esc(it.name)}"></label>
-      <div class="row2">
-        <label>Width (cm)<input type="number" step="10" min="80" data-k="w" value="${it.w}"></label>
-        <label>Length (cm)<input type="number" step="10" min="80" data-k="h" value="${it.h}"></label>
-      </div>
-      <label>Wall Height (cm)<input type="number" step="10" min="220" data-k="wallH" value="${it.wallH || 280}"></label>
-      
-      <label>Flooring Material
-        <select data-k="floorMaterial">
-          ${materialStudio.getFloorMaterials().map(m => `<option value="${m.id}" ${m.id === it.floorMaterial ? 'selected' : ''}>${m.label}</option>`).join('')}
-        </select>
-      </label>
-      <label>Floor Tint Color<input type="color" data-k="floor" value="${it.floor || floorMat.color}"></label>
-
-      <label>Wall Material
-        <select data-k="wallMaterial">
-          ${materialStudio.getWallMaterials().map(m => `<option value="${m.id}" ${m.id === it.wallMaterial ? 'selected' : ''}>${m.label}</option>`).join('')}
-        </select>
-      </label>
-      <label>Wall Tint Color<input type="color" data-k="wall" value="${it.wall || wallMat.color}"></label>
-
-      <div style="background:#f5efe6; padding:10px; border-radius:8px; margin:14px 0;">
-        <span style="font-weight:600; font-size:12px;">Area: ${(it.w * it.h / 10000).toFixed(2)} m² [${Math.round((it.w * it.h / 10000) * 10.7639)} sq.ft]</span>
-      </div>
-
-      <div class="btns">
-        <button id="pnlRoomMakeover" class="primary" style="flex:1;">✨ Makeover This Room</button>
-        <button data-act="dup">Duplicate</button>
-        <button class="danger" data-act="del">Delete</button>
-      </div>
-    `;
-
-    $('pnlRoomMakeover')?.addEventListener('click', () => openStudioTool('makeover'));
-  } else {
-    panel.innerHTML = `
-      <h3>${esc(it.label || it.type)}</h3>
-      <div class="row2">
-        <label>X (cm)<input type="number" step="10" data-k="x" value="${it.x}"></label>
-        <label>Y (cm)<input type="number" step="10" data-k="y" value="${it.y}"></label>
-      </div>
-      <div class="row2">
-        <label>Width (cm)<input type="number" step="5" min="10" data-k="w" value="${it.w}"></label>
-        <label>Depth (cm)<input type="number" step="5" min="10" data-k="d" value="${it.d}"></label>
-      </div>
-      <div class="row2">
-        <label>Height (cm)<input type="number" step="5" min="10" data-k="h" value="${it.h}"></label>
-        <label>Rotation (°)<input type="number" step="90" data-k="rot" value="${it.rot || 0}"></label>
-      </div>
-      <label>Color Tint<input type="color" data-k="color" value="${it.color || '#9c7a52'}"></label>
-      <label>Estimated Price (INR ₹)<input type="number" step="1000" data-k="price" value="${it.price || 15000}"></label>
-
-      <div class="btns">
-        <button data-act="rot">Rotate 90°</button>
-        <button data-act="dup">Duplicate</button>
-        <button class="danger" data-act="del">Delete</button>
-      </div>
-    `;
-  }
-}
-
-panel.addEventListener('change', e => {
-  const k = e.target.dataset.k;
-  const it = selItem();
-  if (!k || !it) return;
-
-  const before = JSON.stringify(home);
-  let v = e.target.value;
-
-  if (e.target.type === 'number') {
-    v = parseFloat(v);
-    if (!Number.isFinite(v)) return;
-    if (['w', 'h', 'd'].includes(k)) v = Math.max(10, v);
-    if (k === 'rot') v = ((v % 360) + 360) % 360;
-  }
-
-  it[k] = v;
-  record(before);
-  commit();
-});
-
-panel.addEventListener('click', e => {
-  const a = e.target.dataset.act;
-  if (a === 'dup') duplicateSel();
-  else if (a === 'del') removeSel();
-  else if (a === 'rot') rotateSel();
-});
-
-$('panelClose').onclick = () => {
-  activeStudioTool = null;
-  document.querySelectorAll('.btn-studio').forEach(b => b.classList.remove('active'));
-  renderPropertiesPanel();
-};
-
-// ---------------- Studio Tools Panel Orchestration ----------------
-function openStudioTool(toolId) {
-  activeStudioTool = toolId;
-  document.querySelectorAll('.btn-studio').forEach(b => b.classList.remove('active'));
-
-  const btnMap = {
-    makeover: $('btnMakeover'),
-    layout: $('btnLayout'),
-    lighting: $('btnLighting'),
-    materials: $('btnMaterials'),
-    floors: $('btnFloors'),
-    budget: $('btnBudget'),
-    analyzer: $('btnAnalyzer'),
-    moodboard: $('btnMoodboard'),
-    compare: $('btnCompare')
-  };
-  if (btnMap[toolId]) btnMap[toolId].classList.add('active');
-
-  renderStudioPanel(toolId);
-}
-
-function renderStudioPanel(toolId) {
-  switch (toolId) {
-    case 'makeover':
-      renderMakeoverStudio();
-      break;
-    case 'layout':
-      renderLayoutOptimizerStudio();
-      break;
-    case 'lighting':
-      renderLightingSimulator();
-      break;
-    case 'materials':
-      renderMaterialStudio();
-      break;
-    case 'floors':
-      renderFloorStudio();
-      break;
-    case 'budget':
-      renderBudgetStudio();
-      break;
-    case 'analyzer':
-      renderAnalyzerStudio();
-      break;
-    case 'moodboard':
-      renderMoodboardStudio();
-      break;
-    case 'compare':
-      renderComparisonStudio();
-      break;
-    default:
-      renderPropertiesPanel();
-      break;
-  }
-}
-
-// 1. SMART ROOM MAKEOVER
-function renderMakeoverStudio() {
-  panelTitle.textContent = 'Smart Room Makeover';
-  const targetRoom = (sel?.kind === 'room' && selItem()) || home.rooms[0];
-
-  if (!targetRoom) {
-    panel.innerHTML = '<p class="empty">Please create or select a room first to apply a makeover.</p>';
-    return;
-  }
-
-  const styles = makeoverEngine.getStyles();
-
-  panel.innerHTML = `
-    <div style="background:#f4eee2; padding:10px; border-radius:8px; margin-bottom:12px;">
-      <span style="font-size:11px; font-weight:700; color:var(--wood); text-transform:uppercase;">Selected Target Room:</span>
-      <h3 style="margin:2px 0;">${esc(targetRoom.name)}</h3>
-      <span style="font-size:11.5px; color:var(--muted);">${(targetRoom.w / 100).toFixed(1)}×${(targetRoom.h / 100).toFixed(1)} m · ${(targetRoom.w * targetRoom.h / 10000).toFixed(1)} m²</span>
-    </div>
-
-    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">Choose an architectural interior style to transform walls, floors, furniture colors, and lighting with one click:</p>
-
-    <div class="style-grid">
-      ${styles.map(s => `
-        <div class="style-card" data-style="${s.id}">
-          <span class="badge">${s.badge}</span>
-          <h4>${s.name}</h4>
-          <div class="palette-dots">
-            ${s.palette.map(hex => `<span class="palette-dot" style="background:${hex};"></span>`).join('')}
-          </div>
-        </div>
-      `).join('')}
-    </div>
-
-    <div id="makeoverActionContainer" style="margin-top:16px;" hidden>
-      <div style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:10px;">
-        <h4 id="previewStyleName" style="margin:0 0 4px; font-size:13px; color:var(--ink);">Style</h4>
-        <p id="previewStyleTagline" style="font-size:11.5px; color:var(--muted); margin-bottom:10px;">Tagline</p>
-        <div class="btns">
-          <button id="btnApplyMakeover" class="primary" style="flex:1;">Apply Makeover</button>
-          <button id="btnSaveVariation">Save Variation</button>
-        </div>
-      </div>
-    </div>
-
-    ${makeoverEngine.lastBeforeSnapshot ? `
-      <div style="margin-top:14px;">
-        <button id="btnUndoMakeover" class="danger" style="width:100%;">↶ Undo Last Makeover</button>
-      </div>
-    ` : ''}
-  `;
-
-  let currentMakeoverResult = null;
-
-  panel.querySelectorAll('.style-card').forEach(card => {
-    card.addEventListener('click', () => {
-      panel.querySelectorAll('.style-card').forEach(c => c.classList.remove('selected'));
-      card.classList.add('selected');
-
-      const styleId = card.dataset.style;
-      currentMakeoverResult = makeoverEngine.generateMakeover(targetRoom, styleId, home);
-
-      $('makeoverActionContainer').hidden = false;
-      $('previewStyleName').textContent = currentMakeoverResult.style.name;
-      $('previewStyleTagline').textContent = currentMakeoverResult.style.tagline;
-    });
-  });
-
-  $('btnApplyMakeover')?.addEventListener('click', () => {
-    if (!currentMakeoverResult) return;
-    const before = JSON.stringify(home);
-    makeoverEngine.applyMakeover(currentMakeoverResult, home);
-    record(before);
-    commit();
-    setStatus(`Applied ${currentMakeoverResult.style.name} Makeover`);
-  });
-
-  $('btnSaveVariation')?.addEventListener('click', () => {
-    if (!currentMakeoverResult) return;
-    makeoverEngine.saveAsVariation(currentMakeoverResult, home);
-    commit(false);
-    setStatus(`Saved as new variation`);
-  });
-
-  $('btnUndoMakeover')?.addEventListener('click', () => {
-    makeoverEngine.undoMakeover(home);
-    commit();
-    setStatus('Makeover undone');
-  });
-}
-
-// 2. INTELLIGENT FURNITURE LAYOUT ENGINE
-function renderLayoutOptimizerStudio() {
-  panelTitle.textContent = 'Intelligent Layout Engine';
-  const targetRoom = (sel?.kind === 'room' && selItem()) || home.rooms[0];
-
-  if (!targetRoom) {
-    panel.innerHTML = '<p class="empty">Please create or select a room to generate layout optimizations.</p>';
-    return;
-  }
-
-  const roomFurn = home.furn.filter(f => f.floorId === targetRoom.floorId && inRect(targetRoom, { x: f.x, y: f.y }));
-  if (roomFurn.length === 0) {
-    panel.innerHTML = `
-      <p class="empty">${esc(targetRoom.name)} has no furniture yet. Add furniture from the left sidebar to generate optimized arrangements.</p>
-    `;
-    return;
-  }
-
-  const layouts = layoutEngine.generateLayouts(targetRoom, home.furn);
-
-  panel.innerHTML = `
-    <div style="background:#f4eee2; padding:10px; border-radius:8px; margin-bottom:12px;">
-      <span style="font-size:11px; font-weight:700; color:var(--wood); text-transform:uppercase;">Optimizing Room:</span>
-      <h3 style="margin:2px 0;">${esc(targetRoom.name)}</h3>
-      <span style="font-size:11.5px; color:var(--muted);">${roomFurn.length} furniture items · ${(targetRoom.w * targetRoom.h / 10000).toFixed(1)} m² floor</span>
-    </div>
-
-    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:12px;">Geometric collision &amp; clearance optimization results:</p>
-
-    <div style="display:flex; flex-direction:column; gap:10px;">
-      ${layouts.map((l, idx) => `
-        <div class="style-card" style="padding:12px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <span class="badge" style="background:#f0ebe1; padding:2px 6px; border-radius:4px;">${l.badge}</span>
-            <span style="font-weight:700; font-size:13px; color:var(--wood);">Efficiency: ${l.score}/100</span>
-          </div>
-          <h4 style="font-size:14px; margin-bottom:4px;">${l.title}</h4>
-          <p style="font-size:11.5px; color:var(--muted); line-height:1.4; margin-bottom:8px;">${l.rationale}</p>
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-size:11px; font-weight:600; color:var(--ink-soft);">Free Floor: ${l.freeSpaceM2.toFixed(1)} m² (${l.freeSpacePct}%)</span>
-            <button class="primary btn-apply-layout" data-idx="${idx}" style="font-size:11px; padding:4px 8px;">Apply Layout</button>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-  `;
-
-  panel.querySelectorAll('.btn-apply-layout').forEach(b => {
-    b.addEventListener('click', () => {
-      const idx = parseInt(b.dataset.idx, 10);
-      const chosen = layouts[idx];
-      const before = JSON.stringify(home);
-
-      // Replace items in home.furn
-      const itemMap = new Map(chosen.items.map(it => [it.id, it]));
-      home.furn.forEach(f => {
-        if (itemMap.has(f.id)) {
-          Object.assign(f, itemMap.get(f.id));
-        }
-      });
-
-      record(before);
-      commit();
-      setStatus(`Applied ${chosen.title}`);
-    });
-  });
-}
-
-// 3. SMART LIGHTING SIMULATOR
-function renderLightingSimulator() {
-  panelTitle.textContent = 'Lighting Simulator';
-  const lighting = home.lighting || {
-    preset: 'afternoon',
-    sunIntensity: 1.8,
-    ambientIntensity: 0.9,
-    artificialIntensity: 1.0,
-    colorTemp: 'warm',
-    shadows: true,
-    artificialEnabled: true
-  };
-
-  const presets = lightingSim.getPresets();
-
-  panel.innerHTML = `
-    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:12px;">Real-time natural sunlight, shadows, and interior fixtures:</p>
-
-    <label>Day / Night Presets</label>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:14px;">
-      ${presets.map(p => `
-        <button class="item ${p.id === lighting.preset ? 'on' : ''} btn-light-preset" data-preset="${p.id}" style="padding:8px; display:block; text-align:center;">
-          <div style="font-weight:600; font-size:12px;">${p.label.split('(')[0]}</div>
-          <small style="font-size:10px;">${p.desc.slice(0, 24)}...</small>
-        </button>
-      `).join('')}
-    </div>
-
-    <label>Color Temperature</label>
-    <div class="row3" style="margin-bottom:14px;">
-      <button class="btn-temp ${lighting.colorTemp === 'warm' ? 'on' : ''}" data-temp="warm">Warm 2700K</button>
-      <button class="btn-temp ${lighting.colorTemp === 'neutral' ? 'on' : ''}" data-temp="neutral">Neutral 4200K</button>
-      <button class="btn-temp ${lighting.colorTemp === 'cool' ? 'on' : ''}" data-temp="cool">Cool 6500K</button>
-    </div>
-
-    <label>Direct Sunlight Intensity (${(lighting.sunIntensity ?? 1.8).toFixed(1)}x)
-      <input type="range" id="sliderSun" min="0" max="35" value="${Math.round((lighting.sunIntensity ?? 1.8) * 10)}">
-    </label>
-
-    <label>Ambient Sky Diffusion (${(lighting.ambientIntensity ?? 0.9).toFixed(1)}x)
-      <input type="range" id="sliderAmbient" min="1" max="25" value="${Math.round((lighting.ambientIntensity ?? 0.9) * 10)}">
-    </label>
-
-    <label>Interior Artificial Light Fixtures (${(lighting.artificialIntensity ?? 1.0).toFixed(1)}x)
-      <input type="range" id="sliderArtificial" min="0" max="25" value="${Math.round((lighting.artificialIntensity ?? 1.0) * 10)}">
-    </label>
-
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px;">
-      <label style="margin:0; font-size:12px;">Real-Time Shadow Casting</label>
-      <input type="checkbox" id="chkShadows" ${lighting.shadows !== false ? 'checked' : ''} style="width:20px; height:20px;">
-    </div>
-  `;
-
-  panel.querySelectorAll('.btn-light-preset').forEach(b => {
-    b.addEventListener('click', () => {
-      lightingSim.setPreset(b.dataset.preset, home);
-      commit(false);
-      renderLightingSimulator();
-    });
-  });
-
-  panel.querySelectorAll('.btn-temp').forEach(b => {
-    b.addEventListener('click', () => {
-      lightingSim.setParam('colorTemp', b.dataset.temp, home);
-      commit(false);
-      renderLightingSimulator();
-    });
-  });
-
-  $('sliderSun')?.addEventListener('input', e => {
-    lightingSim.setParam('sunIntensity', parseInt(e.target.value, 10) / 10, home);
-  });
-  $('sliderAmbient')?.addEventListener('input', e => {
-    lightingSim.setParam('ambientIntensity', parseInt(e.target.value, 10) / 10, home);
-  });
-  $('sliderArtificial')?.addEventListener('input', e => {
-    lightingSim.setParam('artificialIntensity', parseInt(e.target.value, 10) / 10, home);
-  });
-  $('chkShadows')?.addEventListener('change', e => {
-    lightingSim.setParam('shadows', e.target.checked, home);
-  });
-}
-
-// 4. MATERIAL AND TEXTURE STUDIO
-function renderMaterialStudio() {
-  panelTitle.textContent = 'Material & Texture Studio';
-  const targetRoom = (sel?.kind === 'room' && selItem()) || home.rooms[0];
-  const floorMats = materialStudio.getFloorMaterials();
-  const wallMats = materialStudio.getWallMaterials();
-  const combos = materialStudio.savedCombos;
-
-  panel.innerHTML = `
-    <div style="background:#f4eee2; padding:10px; border-radius:8px; margin-bottom:12px;">
-      <span style="font-size:11px; font-weight:700; color:var(--wood); text-transform:uppercase;">Active Room:</span>
-      <h3 style="margin:2px 0;">${targetRoom ? esc(targetRoom.name) : 'Whole Apartment'}</h3>
-    </div>
-
-    <h4>Preset Curated Combinations</h4>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:14px;">
-      ${combos.map(c => `
-        <button class="style-card btn-apply-combo" data-cid="${c.id}" style="padding:8px;">
-          <h4 style="font-size:12px; margin:0 0 4px;">${c.name}</h4>
-          <div style="display:flex; gap:4px;">
-            <span style="display:inline-block; width:16px; height:16px; border-radius:3px; background:${c.floorColor}; border:1px solid #ccc;"></span>
-            <span style="display:inline-block; width:16px; height:16px; border-radius:3px; background:${c.wallColor}; border:1px solid #ccc;"></span>
-          </div>
-        </button>
-      `).join('')}
-    </div>
-
-    <h4>Flooring Library (PBR Procedural)</h4>
-    <div style="max-height:180px; overflow-y:auto; margin-bottom:14px;">
-      ${floorMats.map(m => `
-        <div class="material-card-row btn-set-floor" data-fid="${m.id}" data-col="${m.color}">
-          <div class="material-swatch-box" style="background:${m.color};"></div>
-          <div style="flex:1;">
-            <div style="font-weight:600; font-size:12px;">${m.label}</div>
-            <div style="font-size:10.5px; color:var(--muted);">Rate: ₹${m.rateINR}/m²</div>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-
-    <h4>Wall Finishes Library</h4>
-    <div style="max-height:180px; overflow-y:auto; margin-bottom:14px;">
-      ${wallMats.map(m => `
-        <div class="material-card-row btn-set-wall" data-wid="${m.id}" data-col="${m.color}">
-          <div class="material-swatch-box" style="background:${m.color};"></div>
-          <div style="flex:1;">
-            <div style="font-weight:600; font-size:12px;">${m.label}</div>
-            <div style="font-size:10.5px; color:var(--muted);">Rate: ₹${m.rateINR}/m²</div>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-  `;
-
-  panel.querySelectorAll('.btn-apply-combo').forEach(b => {
-    b.addEventListener('click', () => {
-      const combo = combos.find(c => c.id === b.dataset.cid);
-      if (!combo) return;
-      if (targetRoom) {
-        materialStudio.applyToRoom(targetRoom, {
-          floorMatId: combo.floor,
-          floorColor: combo.floorColor,
-          wallMatId: combo.wall,
-          wallColor: combo.wallColor
-        });
-      } else {
-        materialStudio.applyGlobally(home, combo);
-      }
-      commit();
-    });
-  });
-
-  panel.querySelectorAll('.btn-set-floor').forEach(b => {
-    b.addEventListener('click', () => {
-      if (!targetRoom) return;
-      materialStudio.applyToRoom(targetRoom, {
-        floorMatId: b.dataset.fid,
-        floorColor: b.dataset.col
-      });
-      commit();
-    });
-  });
-
-  panel.querySelectorAll('.btn-set-wall').forEach(b => {
-    b.addEventListener('click', () => {
-      if (!targetRoom) return;
-      materialStudio.applyToRoom(targetRoom, {
-        wallMatId: b.dataset.wid,
-        wallColor: b.dataset.col
-      });
-      commit();
-    });
-  });
-}
-
-// 5. MULTI-FLOOR ARCHITECTURE
-function renderFloorStudio() {
-  panelTitle.textContent = 'Multi-Floor Architecture';
-  const floors = floorManager.getFloors(home);
-  const activeFloor = floorManager.getActiveFloor(home);
-
-  panel.innerHTML = `
-    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:12px;">Manage building levels, heights, staircases, and 3D stacking:</p>
-
-    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;">
-      ${floors.map(f => {
-        const stats = floorManager.getFloorStats(home, f.id);
-        const isCurrent = f.id === home.currentFloorId;
-        return `
-          <div style="background:#fff; border:1px solid ${isCurrent ? 'var(--wood)' : 'var(--line)'}; border-radius:8px; padding:10px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-weight:700; font-size:13px; color:${isCurrent ? 'var(--wood)' : 'var(--ink)'};">${esc(f.name)}</span>
-              <span style="font-size:11px; background:#f5efe6; padding:2px 6px; border-radius:4px;">Elev: ${(f.elevation / 100).toFixed(1)}m</span>
-            </div>
-            <div style="font-size:11.5px; color:var(--muted); margin:4px 0 8px;">
-              ${stats.roomCount} rooms · ${stats.furnCount} furniture · ${stats.areaM2.toFixed(1)} m²
-            </div>
-            <div style="display:flex; gap:6px;">
-              <button class="btn-switch-floor ${isCurrent ? 'primary' : ''}" data-fid="${f.id}" style="font-size:11px; padding:3px 8px; flex:1;">
-                ${isCurrent ? 'Active Editing Level' : 'Switch To This Level'}
-              </button>
-              ${floors.length > 1 ? `<button class="danger btn-del-floor" data-fid="${f.id}" style="font-size:11px; padding:3px 8px;">Delete</button>` : ''}
-            </div>
-          </div>
-        `;
-      }).join('')}
-    </div>
-
-    <div class="btns">
-      <button id="btnAddFloorNew" class="primary" style="flex:1;">+ Add New Floor</button>
-      <button id="btnAddStairs">Insert Staircase</button>
-    </div>
-
-    <div style="margin-top:16px; padding:12px; background:#f4eee2; border-radius:8px;">
-      <h4 style="margin:0 0 6px; font-size:12px; color:var(--ink);">3D Building Isolation</h4>
-      <div style="display:flex; gap:6px;">
-        <button id="btnIsoAll" class="${!floorManager.isolatedFloorId ? 'on' : ''}" style="flex:1; font-size:11.5px;">All Floors Stacked</button>
-        <button id="btnIsoCurrent" class="${floorManager.isolatedFloorId ? 'on' : ''}" style="flex:1; font-size:11.5px;">Isolate Active Floor</button>
-      </div>
-    </div>
-  `;
-
-  panel.querySelectorAll('.btn-switch-floor').forEach(b => {
-    b.addEventListener('click', () => {
-      floorManager.setActiveFloor(home, b.dataset.fid);
-      updateFloorSelector();
-      commit();
-      fit2D();
-    });
-  });
-
-  panel.querySelectorAll('.btn-del-floor').forEach(b => {
-    b.addEventListener('click', () => {
-      if (confirm('Delete this floor and all its rooms?')) {
-        floorManager.removeFloor(home, b.dataset.fid);
-        updateFloorSelector();
-        commit();
-        fit2D();
-      }
-    });
-  });
-
-  $('btnAddFloorNew')?.addEventListener('click', () => {
-    floorManager.addFloor(home);
-    updateFloorSelector();
-    commit();
-  });
-
-  $('btnAddStairs')?.addEventListener('click', () => {
-    floorManager.addStaircase(home, 200, 200);
-    commit();
-  });
-
-  $('btnIsoAll')?.addEventListener('click', () => {
-    floorManager.setIsolatedFloor(null);
-    threeStudio.rebuild(home, { isolateFloorId: null });
-    renderFloorStudio();
-  });
-
-  $('btnIsoCurrent')?.addEventListener('click', () => {
-    floorManager.setIsolatedFloor(home.currentFloorId);
-    threeStudio.rebuild(home, { isolateFloorId: home.currentFloorId });
-    renderFloorStudio();
-  });
-}
-
-// 6. INTERIOR BUDGET PLANNER
-function renderBudgetStudio() {
-  panelTitle.textContent = 'Interior Budget Planner';
-  const data = budgetPlanner.calculateBudget(home);
-
-  if (!data) {
-    panel.innerHTML = '<p class="empty">No rooms available for budget calculation.</p>';
-    return;
-  }
-
-  panel.innerHTML = `
-    <div style="background:#f4eee2; padding:12px; border-radius:8px; margin-bottom:14px; text-align:center;">
-      <span style="font-size:11px; font-weight:700; color:var(--wood); text-transform:uppercase;">Overall Projected Interior Budget</span>
-      <h2 style="font:700 24px ui-serif, Georgia, serif; color:var(--ink); margin:4px 0;">₹${data.totalEstimatedBudget.toLocaleString('en-IN')}</h2>
-      <div style="font-size:11.5px; color:var(--muted);">
-        ₹${data.costPerM2.toLocaleString('en-IN')} / m² · ₹${data.costPerSqFt.toLocaleString('en-IN')} / sq.ft (${data.totalFloorAreaM2.toFixed(1)} m² built-up)
-      </div>
-    </div>
-
-    <h4>Category Breakdown</h4>
-    <div style="margin-bottom:16px;">
-      ${data.categories.map(c => `
-        <div class="score-bar-group">
-          <div class="score-bar-label">
-            <span>${c.name}</span>
-            <b>₹${c.amount.toLocaleString('en-IN')} (${c.pct}%)</b>
-          </div>
-          <div class="score-track">
-            <div class="score-fill" style="width:${c.pct}%; background:${c.color};"></div>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-
-    <h4>Itemized Furniture Inventory (${data.itemizedFurn.length} Types)</h4>
-    <div style="max-height:160px; overflow-y:auto; margin-bottom:14px; border:1px solid var(--line); border-radius:6px; background:#fff;">
-      <table style="width:100%; border-collapse:collapse; font-size:11px;">
-        <tbody>
-          ${data.itemizedFurn.map(f => `
-            <tr style="border-bottom:1px solid var(--line);">
-              <td style="padding:6px 8px;">${f.label} (×${f.count})</td>
-              <td style="padding:6px 8px; text-align:right; font-weight:600;">₹${f.total.toLocaleString('en-IN')}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-
-    <p style="font-size:10.5px; color:var(--muted); line-height:1.4; font-style:italic;">
-      Disclaimer: Estimated Budget Projection based on standard Indian interior market benchmarks. Not a live contractual quotation.
-    </p>
-  `;
-}
-
-// 7. DESIGN QUALITY ANALYZER
-function renderAnalyzerStudio() {
-  panelTitle.textContent = 'Design Quality Analyzer';
-  const targetRoom = sel?.kind === 'room' ? sel.id : null;
-  const audit = analyzer.analyze(home, targetRoom);
-
-  panel.innerHTML = `
-    <div style="background:#f4eee2; padding:12px; border-radius:8px; margin-bottom:14px; text-align:center;">
-      <span style="font-size:11px; font-weight:700; color:var(--wood); text-transform:uppercase;">Overall Design Quality Score</span>
-      <h2 style="font:700 28px ui-serif, Georgia, serif; color:var(--ink); margin:4px 0;">${audit.overallScore} <small style="font-size:16px; color:var(--muted);">/ 100</small></h2>
-      <span class="badge" style="background:#e8dfd0; padding:3px 10px; border-radius:12px; font-size:11.5px; font-weight:600;">Rating: ${audit.rating}</span>
-    </div>
-
-    <h4>Category Metrics (Transparent Rules)</h4>
-    <div style="margin-bottom:14px;">
-      ${audit.categories.map(c => `
-        <div class="score-bar-group">
-          <div class="score-bar-label">
-            <span>${c.name}</span>
-            <b>${c.score}/100</b>
-          </div>
-          <div class="score-track">
-            <div class="score-fill" style="width:${c.score}%; background:${c.score >= 80 ? 'var(--accent-green)' : c.score >= 60 ? 'var(--accent-gold)' : 'var(--accent-red)'};"></div>
-          </div>
-          <div style="font-size:10px; color:var(--muted); margin-top:2px;">${c.desc}</div>
-        </div>
-      `).join('')}
-    </div>
-
-    ${audit.warnings.length > 0 ? `
-      <h4>Detected Clearance &amp; Collision Issues (${audit.warnings.length})</h4>
-      <div style="margin-bottom:14px;">
-        ${audit.warnings.map(w => `
-          <div class="warning-item ${w.severity}">
-            <b>${w.room}:</b> ${w.message}
-          </div>
-        `).join('')}
-      </div>
-    ` : '<div class="warning-item tip" style="margin-bottom:14px;">✓ Zero collisions detected! All furniture fits within boundaries.</div>'}
-
-    ${audit.tips.length > 0 ? `
-      <h4>Optimization Suggestions (${audit.tips.length})</h4>
-      <div>
-        ${audit.tips.map(t => `
-          <div class="warning-item tip">
-            <b>${t.room}:</b> ${t.message}
-          </div>
-        `).join('')}
-      </div>
-    ` : ''}
-  `;
-}
-
-// 8. MOODBOARD GENERATOR
-function renderMoodboardStudio() {
-  panelTitle.textContent = 'Moodboard Studio';
-  const targetRoom = (sel?.kind === 'room' && selItem()) || home.rooms[0];
-
-  if (!targetRoom) {
-    panel.innerHTML = '<p class="empty">Please create or select a room to generate a visual moodboard.</p>';
-    return;
-  }
-
-  const mb = moodboardGen.generateMoodboard(targetRoom, home);
-
-  panel.innerHTML = `
-    <div style="background:#f4eee2; padding:10px; border-radius:8px; margin-bottom:12px;">
-      <span style="font-size:11px; font-weight:700; color:var(--wood); text-transform:uppercase;">Room Concept:</span>
-      <h3 style="margin:2px 0;">${esc(mb.roomName)}</h3>
-      <span style="font-size:11.5px; color:var(--wood); font-weight:600;">${mb.themeName} Aesthetic</span>
-    </div>
-
-    <h4>Color Palette Swatches</h4>
-    <div style="display:flex; gap:6px; margin-bottom:14px;">
-      ${mb.palette.map(p => `
-        <div style="flex:1; text-align:center;">
-          <div style="height:36px; border-radius:6px; background:${p.hex}; border:1px solid rgba(0,0,0,0.1);"></div>
-          <div style="font-size:9.5px; font-weight:600; margin-top:3px;">${p.hex.toUpperCase()}</div>
-          <div style="font-size:8.5px; color:var(--muted);">${p.label}</div>
-        </div>
-      `).join('')}
-    </div>
-
-    <h4>Specified Materials</h4>
-    <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:14px;">
-      <div class="material-card-row">
-        <div class="material-swatch-box" style="background:${mb.floorMaterial.color};"></div>
-        <div style="flex:1;">
-          <div style="font-weight:600; font-size:12px;">Floor: ${mb.floorMaterial.label}</div>
-          <div style="font-size:10.5px; color:var(--muted);">${mb.floorMaterial.desc.slice(0, 40)}...</div>
-        </div>
-      </div>
-      <div class="material-card-row">
-        <div class="material-swatch-box" style="background:${mb.wallMaterial.color};"></div>
-        <div style="flex:1;">
-          <div style="font-weight:600; font-size:12px;">Wall: ${mb.wallMaterial.label}</div>
-          <div style="font-size:10.5px; color:var(--muted);">${mb.wallMaterial.desc.slice(0, 40)}...</div>
-        </div>
-      </div>
-    </div>
-
-    <h4>Curated Pieces (${mb.furnitureList.length})</h4>
-    <div style="max-height:140px; overflow-y:auto; margin-bottom:14px; border:1px solid var(--line); border-radius:6px; background:#fff;">
-      ${mb.furnitureList.map(f => `
-        <div style="display:flex; justify-content:space-between; padding:5px 8px; border-bottom:1px solid var(--line); font-size:11px;">
-          <span>${f.label}</span>
-          <span style="color:var(--muted);">${f.dimensions}</span>
-        </div>
-      `).join('')}
-    </div>
-
-    <button id="btnExportMoodboard" class="primary" style="width:100%;">Export High-Res Moodboard Image (PNG)</button>
-  `;
-
-  $('btnExportMoodboard')?.addEventListener('click', () => {
-    const pngUrl = moodboardGen.exportMoodboardCanvas(mb);
-    const a = document.createElement('a');
-    a.download = `${targetRoom.name.replace(/\s+/g, '_')}_Moodboard.png`;
-    a.href = pngUrl;
-    a.click();
-  });
-}
-
-// 9. DESIGN COMPARISON
-function renderComparisonStudio() {
-  panelTitle.textContent = 'Design Comparison';
-  const variations = home.variations || [];
-
-  panel.innerHTML = `
-    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:12px;">Save multiple design options and compare scores, arrangements, and budgets:</p>
-
-    <div style="margin-bottom:14px;">
-      <button id="btnSaveCurrentVariation" class="primary" style="width:100%;">+ Save Current Design as Variation</button>
-    </div>
-
-    <h4>Saved Variations (${variations.length})</h4>
-    ${variations.length === 0 ? `
-      <p class="empty">No variations saved yet. Click "Save Current Design" or use the Smart Makeover tool to generate variations.</p>
-    ` : `
-      <div style="display:flex; flex-direction:column; gap:8px;">
-        ${variations.map(v => `
-          <div style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-weight:700; font-size:13px; color:var(--ink);">${esc(v.name)}</span>
-              <span style="font-size:10px; color:var(--muted);">${v.timestamp || ''}</span>
-            </div>
-            <div style="font-size:11px; color:var(--muted); margin:4px 0 8px;">
-              ${v.roomsCount || 0} rooms · ${v.furnCount || 0} furniture items
-            </div>
-            <div style="display:flex; gap:6px;">
-              <button class="primary btn-restore-var" data-vid="${v.id}" style="font-size:11px; padding:3px 8px; flex:1;">Restore This Design</button>
-              <button class="danger btn-del-var" data-vid="${v.id}" style="font-size:11px; padding:3px 8px;">Delete</button>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    `}
-  `;
-
-  $('btnSaveCurrentVariation')?.addEventListener('click', () => {
-    const name = prompt('Enter a name for this design variation:', `Design Concept ${String.fromCharCode(65 + (home.variations?.length || 0))}`);
-    if (name) {
-      comparator.saveVariation(home, name);
-      commit(false);
-      renderComparisonStudio();
-      setStatus(`Saved variation "${name}"`);
-    }
-  });
-
-  panel.querySelectorAll('.btn-restore-var').forEach(b => {
-    b.addEventListener('click', () => {
-      const vid = b.dataset.vid;
-      if (confirm('Restore this design variation? Current unsaved edits will be replaced.')) {
-        comparator.restoreVariation(home, vid);
-        commit();
-        setStatus('Variation restored');
-      }
-    });
-  });
-
-  panel.querySelectorAll('.btn-del-var').forEach(b => {
-    b.addEventListener('click', () => {
-      comparator.deleteVariation(home, b.dataset.vid);
-      commit(false);
-      renderComparisonStudio();
-    });
-  });
-}
-
-// ---------------- Footer Status & Metrics Updates ----------------
-function updateFooterMetrics() {
+// ---------------- Footer Badges ----------------
+function updateFooterBadges() {
   const audit = analyzer.analyze(home);
   const budget = budgetPlanner.calculateBudget(home);
-
-  $('footerScoreLabel').textContent = `Score: ${audit.overallScore}/100 (${audit.rating})`;
+  $('footerScoreBadge').textContent = `Score: ${audit.overallScore}/100`;
   if (budget) {
-    $('footerBudgetLabel').textContent = `Est. ₹${budget.totalEstimatedBudget.toLocaleString('en-IN')}`;
+    $('footerBudgetBadge').textContent = `Est. ₹${budget.totalEstimatedBudget.toLocaleString('en-IN')}`;
   }
 }
 
-$('pillScore').onclick = () => openStudioTool('analyzer');
-$('pillBudget').onclick = () => openStudioTool('budget');
+// ---------------- Secondary Project Details Modal ----------------
+$('btnSaveDetails').onclick = () => openProjectDetailsModal();
+$('btnFooterDetails').onclick = () => openProjectDetailsModal();
 
-// ---------------- Studio Bar Event Listeners ----------------
-$('btnMakeover').onclick = () => openStudioTool('makeover');
-$('btnLayout').onclick = () => openStudioTool('layout');
-$('btnLighting').onclick = () => openStudioTool('lighting');
-$('btnMaterials').onclick = () => openStudioTool('materials');
-$('btnFloors').onclick = () => openStudioTool('floors');
-$('btnBudget').onclick = () => openStudioTool('budget');
-$('btnAnalyzer').onclick = () => openStudioTool('analyzer');
-$('btnMoodboard').onclick = () => openStudioTool('moodboard');
-$('btnCompare').onclick = () => openStudioTool('compare');
-
-$('btnExploded').onclick = () => {
-  if (view !== '3d') setView('3d');
-  $('explodedOverlay').hidden = false;
-  $('explodedSlider').value = 0;
-  $('explodedVal').textContent = '0%';
-  explodedController.setProgress(0);
-};
-
-// ---------------- Modal Overlays (Projects & VR) ----------------
-$('btnProjects').onclick = () => {
-  openProjectsModal();
-};
-
-function openProjectsModal() {
-  const projects = projectManager.getProjects();
+function openProjectDetailsModal() {
   modalContainer.hidden = false;
   modalContainer.className = 'modal-backdrop';
 
-  modalContainer.innerHTML = `
-    <div class="modal-window">
-      <div class="modal-header">
-        <h3>Project Portfolio &amp; Manager</h3>
-        <button id="modalClose" style="font-size:16px; padding:2px 8px;">✕</button>
-      </div>
-      <div class="modal-body">
-        <p style="font-size:12.5px; color:var(--muted); margin-bottom:16px;">
-          Manage saved architectural projects, clone layouts, or switch between apartment portfolios:
-        </p>
-        <div class="project-grid">
-          ${projects.map(p => `
-            <div class="project-card" data-pid="${p.id}">
-              <div class="project-thumb">
-                ${p.thumbnail ? `<img src="${p.thumbnail}">` : `<span>🏠 ${p.roomCount || 5} Rooms</span>`}
-              </div>
-              <b style="font-size:13.5px; margin-top:4px;">${esc(p.name)}</b>
-              <small style="color:var(--muted); font-size:11px;">Updated: ${new Date(p.updatedAt || Date.now()).toLocaleDateString()}</small>
-              <div style="display:flex; gap:6px; margin-top:8px;">
-                <button class="primary btn-open-proj" data-pid="${p.id}" style="font-size:11px; padding:3px 8px; flex:1;">Open</button>
-                <button class="btn-dup-proj" data-pid="${p.id}" style="font-size:11px; padding:3px 8px;">Copy</button>
+  let currentTab = 'budget';
+  const renderModal = () => {
+    const budget = budgetPlanner.calculateBudget(home);
+    const variations = home.variations || [];
+    const floors = floorManager.getFloors(home);
+
+    modalContainer.innerHTML = `
+      <div class="modal-window">
+        <div class="modal-header">
+          <h3>Project Details &amp; Administration</h3>
+          <button id="modalClose">✕</button>
+        </div>
+        <div class="modal-tabs">
+          <button class="modal-tab-btn ${currentTab === 'budget' ? 'on' : ''}" data-mtab="budget">💰 Budget Planner</button>
+          <button class="modal-tab-btn ${currentTab === 'variations' ? 'on' : ''}" data-mtab="variations">📁 Portfolio &amp; Variations</button>
+          <button class="modal-tab-btn ${currentTab === 'floors' ? 'on' : ''}" data-mtab="floors">🏢 Building Levels (${floors.length})</button>
+        </div>
+        <div class="modal-body">
+          ${currentTab === 'budget' ? `
+            <div style="background:#f4eee2; padding:12px; border-radius:8px; margin-bottom:14px; text-align:center;">
+              <span style="font-size:11px; font-weight:700; color:var(--wood); text-transform:uppercase;">Overall Projected Interior Cost</span>
+              <h2 style="font:700 24px ui-serif, Georgia, serif; color:var(--ink); margin:4px 0;">₹${budget.totalEstimatedBudget.toLocaleString('en-IN')}</h2>
+              <div style="font-size:11.5px; color:var(--muted);">
+                ₹${budget.costPerM2.toLocaleString('en-IN')} / m² · ₹${budget.costPerSqFt.toLocaleString('en-IN')} / sq.ft (${budget.totalFloorAreaM2.toFixed(1)} m² built-up)
               </div>
             </div>
-          `).join('')}
+
+            <h4>Category-Wise Breakdown</h4>
+            <div style="margin-bottom:16px;">
+              ${budget.categories.map(c => `
+                <div class="score-bar-group">
+                  <div class="score-bar-label">
+                    <span>${c.name}</span>
+                    <b>₹${c.amount.toLocaleString('en-IN')} (${c.pct}%)</b>
+                  </div>
+                  <div class="score-track">
+                    <div class="score-fill" style="width:${c.pct}%; background:${c.color};"></div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+
+            <h4>Itemized Pieces (${budget.itemizedFurn.length})</h4>
+            <div style="max-height:160px; overflow-y:auto; border:1px solid var(--line); border-radius:6px; background:#fff;">
+              <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+                <tbody>
+                  ${budget.itemizedFurn.map(f => `
+                    <tr style="border-bottom:1px solid var(--line);">
+                      <td style="padding:6px 8px;">${f.label} (×${f.count})</td>
+                      <td style="padding:6px 8px; text-align:right; font-weight:600;">₹${f.total.toLocaleString('en-IN')}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+            <p style="font-size:10.5px; color:var(--muted); margin-top:8px; font-style:italic;">
+              Unit rates based on standard Indian interior market benchmarks. Not a live contractual quotation.
+            </p>
+          ` : currentTab === 'variations' ? `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <p class="section-desc">Save multiple design iterations and restore them with one click:</p>
+              <button id="btnSaveVarNow" class="btn-primary" style="font-size:11.5px;">+ Save Current Design</button>
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              ${variations.length === 0 ? '<p class="section-desc">No variations saved yet.</p>' : variations.map(v => `
+                <div style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <b>${esc(v.name)}</b>
+                    <div style="font-size:11px; color:var(--muted);">${v.timestamp || ''} · ${v.roomsCount || 0} rooms</div>
+                  </div>
+                  <div style="display:flex; gap:6px;">
+                    <button class="btn-primary btn-modal-restore-var" data-vid="${v.id}" style="font-size:11px;">Restore</button>
+                    <button class="danger btn-modal-del-var" data-vid="${v.id}" style="font-size:11px;">Delete</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : `
+            <p class="section-desc">Manage multi-floor building levels and heights:</p>
+            <div style="display:flex; flex-direction:column; gap:8px; margin:10px 0;">
+              ${floors.map(f => {
+                const isCurrent = f.id === home.currentFloorId;
+                return `
+                  <div style="background:#fff; border:1px solid ${isCurrent ? 'var(--wood)' : 'var(--line)'}; border-radius:8px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                      <b style="color:${isCurrent ? 'var(--wood)' : 'var(--ink)'};">${esc(f.name)}</b>
+                      <div style="font-size:11px; color:var(--muted);">Elevation: ${(f.elevation / 100).toFixed(1)}m · Height: ${(f.height / 100).toFixed(1)}m</div>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                      <button class="btn-modal-switch-floor ${isCurrent ? 'btn-primary' : ''}" data-fid="${f.id}" style="font-size:11px;">
+                        ${isCurrent ? 'Active Level' : 'Switch'}
+                      </button>
+                      ${floors.length > 1 ? `<button class="danger btn-modal-del-floor" data-fid="${f.id}" style="font-size:11px;">Delete</button>` : ''}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+            <div class="btns">
+              <button id="btnModalAddFloor" class="btn-primary">+ Add New Level</button>
+              <button id="btnModalAddStairs">Insert Staircase</button>
+            </div>
+          `}
+        </div>
+        <div class="modal-footer">
+          <button id="btnCloseDetails">Close</button>
         </div>
       </div>
-      <div class="modal-footer">
-        <button id="btnNewProjectBlank">+ New Project</button>
-        <button id="btnCloseModal">Close</button>
-      </div>
-    </div>
-  `;
+    `;
 
-  $('modalClose').onclick = () => { modalContainer.hidden = true; };
-  $('btnCloseModal').onclick = () => { modalContainer.hidden = true; };
+    $('modalClose').onclick = () => { modalContainer.hidden = true; };
+    $('btnCloseDetails').onclick = () => { modalContainer.hidden = true; };
 
-  modalContainer.querySelectorAll('.btn-open-proj').forEach(b => {
-    b.addEventListener('click', () => {
-      const p = projectManager.loadProject(b.dataset.pid);
-      loadHome(p);
+    modalContainer.querySelectorAll('.modal-tab-btn').forEach(tb => {
+      tb.addEventListener('click', () => {
+        currentTab = tb.dataset.mtab;
+        renderModal();
+      });
+    });
+
+    $('btnSaveVarNow')?.addEventListener('click', () => {
+      const name = prompt('Name this design variation:', `Concept ${String.fromCharCode(65 + variations.length)}`);
+      if (name) {
+        comparator.saveVariation(home, name);
+        commit(false);
+        renderModal();
+      }
+    });
+
+    modalContainer.querySelectorAll('.btn-modal-restore-var').forEach(b => {
+      b.addEventListener('click', () => {
+        comparator.restoreVariation(home, b.dataset.vid);
+        commit();
+        modalContainer.hidden = true;
+      });
+    });
+    modalContainer.querySelectorAll('.btn-modal-del-var').forEach(b => {
+      b.addEventListener('click', () => {
+        comparator.deleteVariation(home, b.dataset.vid);
+        commit(false);
+        renderModal();
+      });
+    });
+
+    modalContainer.querySelectorAll('.btn-modal-switch-floor').forEach(b => {
+      b.addEventListener('click', () => {
+        floorManager.setActiveFloor(home, b.dataset.fid);
+        commit();
+        fit2D();
+        renderModal();
+      });
+    });
+    modalContainer.querySelectorAll('.btn-modal-del-floor').forEach(b => {
+      b.addEventListener('click', () => {
+        if (confirm('Delete this level?')) {
+          floorManager.removeFloor(home, b.dataset.fid);
+          commit();
+          fit2D();
+          renderModal();
+        }
+      });
+    });
+    $('btnModalAddFloor')?.addEventListener('click', () => {
+      floorManager.addFloor(home);
+      commit();
+      renderModal();
+    });
+    $('btnModalAddStairs')?.addEventListener('click', () => {
+      floorManager.addStaircase(home, 200, 200);
+      commit();
       modalContainer.hidden = true;
     });
-  });
-
-  modalContainer.querySelectorAll('.btn-dup-proj').forEach(b => {
-    b.addEventListener('click', () => {
-      projectManager.duplicateProject(b.dataset.pid);
-      openProjectsModal();
-    });
-  });
-
-  $('btnNewProjectBlank').onclick = () => {
-    loadHome(blankHome());
-    modalContainer.hidden = true;
   };
+
+  renderModal();
 }
 
-$('btnVR').onclick = async () => {
+// ---------------- Clean Export Dialog ----------------
+$('btnExport').onclick = () => {
   modalContainer.hidden = false;
   modalContainer.className = 'modal-backdrop';
-
-  const support = await xrManager.checkSupport();
-
   modalContainer.innerHTML = `
-    <div class="modal-window" style="max-width:540px;">
+    <div class="modal-window" style="max-width:520px;">
       <div class="modal-header">
-        <h3>WebXR AR / VR Immersive Studio</h3>
-        <button id="modalClose" style="font-size:16px; padding:2px 8px;">✕</button>
+        <h3>Export Project</h3>
+        <button id="modalClose">✕</button>
       </div>
-      <div class="modal-body" style="line-height:1.5;">
-        <p style="font-size:13px; color:var(--ink); margin-bottom:14px;">
-          Experience RoomCraft 2.0 inside a virtual reality headset or augmented reality tabletop preview:
-        </p>
-
-        <div style="background:#f4efe6; padding:12px; border-radius:8px; margin-bottom:14px;">
-          <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-            <span style="font-weight:600; font-size:12px;">WebXR Immersive VR:</span>
-            <span style="font-weight:700; color:${support.vr ? 'var(--accent-green)' : 'var(--muted)'};">${support.vr ? '✓ Supported' : 'Hardware Not Detected'}</span>
-          </div>
-          <div style="display:flex; justify-content:space-between;">
-            <span style="font-weight:600; font-size:12px;">WebXR Immersive AR:</span>
-            <span style="font-weight:700; color:${support.ar ? 'var(--accent-green)' : 'var(--muted)'};">${support.ar ? '✓ Supported' : 'Hardware Not Detected'}</span>
-          </div>
-        </div>
-
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <button id="btnEnterVR" class="primary" style="padding:8px;" ${!support.vr ? 'disabled' : ''}>Enter Immersive VR Session</button>
-          <button id="btnEnterAR" class="primary" style="padding:8px;" ${!support.ar ? 'disabled' : ''}>Enter Immersive AR Surface Placement</button>
-          <button id="btnEnterGyro" style="padding:8px;">📱 Launch 360° Device Gyroscope Preview</button>
-        </div>
-
-        <p style="font-size:11px; color:var(--muted); margin-top:14px;">
-          Standard desktop browsers without VR tethering can use our rich First-Person 3D Walkthrough mode with WASD and mouse-look for equivalent immersion!
-        </p>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
+        <button id="expPng2D" class="btn-subtle" style="padding:10px;">
+          <b>📷 High-Resolution Floor Plan (PNG)</b>
+          <div style="font-size:11px; color:var(--muted);">Export crisp 2D drawing of current floor</div>
+        </button>
+        <button id="expPng3D" class="btn-subtle" style="padding:10px;">
+          <b>🖼️ High-Resolution 3D Render (PNG)</b>
+          <div style="font-size:11px; color:var(--muted);">Capture current 3D perspective with realistic lighting</div>
+        </button>
+        <button id="expCad" class="btn-subtle" style="padding:10px;">
+          <b>📐 Technical CAD Blueprint (PNG)</b>
+          <div style="font-size:11px; color:var(--muted);">Export architectural drawing with dimension strings and scale bar</div>
+        </button>
+        <button id="expJson" class="btn-subtle" style="padding:10px;">
+          <b>💾 Project JSON File</b>
+          <div style="font-size:11px; color:var(--muted);">Save complete editable project data to open anytime</div>
+        </button>
       </div>
       <div class="modal-footer">
-        <button id="btnCloseModal">Close</button>
+        <button id="btnCloseExp">Close</button>
       </div>
     </div>
   `;
 
   $('modalClose').onclick = () => { modalContainer.hidden = true; };
-  $('btnCloseModal').onclick = () => { modalContainer.hidden = true; };
+  $('btnCloseExp').onclick = () => { modalContainer.hidden = true; };
 
-  $('btnEnterVR')?.addEventListener('click', async () => {
-    const res = await xrManager.enterVR();
-    if (!res.success) alert(res.message);
-  });
-  $('btnEnterAR')?.addEventListener('click', async () => {
-    const res = await xrManager.enterAR();
-    if (!res.success) alert(res.message);
-  });
-  $('btnEnterGyro')?.addEventListener('click', () => {
-    xrManager.startGyroPreview();
+  $('expPng2D').onclick = () => {
+    projectManager.exportHighResPNG(planCanvas, `${home.name}-floor-plan.png`, 2);
     modalContainer.hidden = true;
-    setView('3d');
-  });
+  };
+  $('expPng3D').onclick = () => {
+    threeStudio.renderer.render(threeStudio.scene, threeStudio.camera);
+    projectManager.exportHighResPNG(threeStudio.canvas, `${home.name}-3d-render.png`, 2);
+    modalContainer.hidden = true;
+  };
+  $('expCad').onclick = () => {
+    blueprintRenderer.render(home, home.currentFloorId);
+    projectManager.exportHighResPNG(blueprintCanvas, `${home.name}-blueprint.png`, 2);
+    modalContainer.hidden = true;
+  };
+  $('expJson').onclick = () => {
+    projectManager.exportJSON(home);
+    modalContainer.hidden = true;
+  };
 };
 
-// ---------------- Header Actions, Exports & Templates ----------------
+// ---------------- Global Keyboard & Event Wiring ----------------
 $('undo').onclick = doUndo;
 $('redo').onclick = doRedo;
 $('name').addEventListener('change', e => {
@@ -1756,47 +1361,6 @@ $('name').addEventListener('change', e => {
   commit(false);
 });
 
-$('newBlank').onclick = () => {
-  loadHome(blankHome());
-};
-$('tpl2bhk').onclick = () => {
-  loadHome(template2bhk());
-};
-$('tplShowcase').onclick = () => {
-  loadHome(templateExhibitionShowcase());
-};
-
-$('exportJson').onclick = () => {
-  projectManager.exportJSON(home);
-};
-$('importJson').addEventListener('change', e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  projectManager.importJSON(
-    file,
-    (importedHome) => {
-      loadHome(importedHome);
-      setStatus('Project imported successfully');
-    },
-    (errMsg) => {
-      alert(`Import error: ${errMsg}`);
-    }
-  );
-  e.target.value = '';
-});
-
-$('exportPng').onclick = () => {
-  if (view === '3d' || view === 'walk' || view === 'presentation') {
-    threeStudio.renderer.render(threeStudio.scene, threeStudio.camera);
-    projectManager.exportHighResPNG(threeStudio.canvas, `${home.name}-3d-render.png`, 2);
-  } else if (view === 'blueprint') {
-    projectManager.exportHighResPNG(blueprintCanvas, `${home.name}-blueprint-cad.png`, 2);
-  } else {
-    projectManager.exportHighResPNG(planCanvas, `${home.name}-floor-plan.png`, 2);
-  }
-};
-
-// ---------------- Global Keyboard & Event Wiring ----------------
 window.addEventListener('keydown', e => {
   if (e.target.matches('input, select, textarea')) return;
   const mod = e.ctrlKey || e.metaKey;
@@ -1829,7 +1393,7 @@ window.addEventListener('keydown', e => {
   } else if (k === 'w' && !mod && !sel) {
     setTool('window');
   } else if (e.key === 'Escape') {
-    if (view === 'walk' || view === 'presentation') {
+    if (view === 'walk' || presentation.isActive) {
       setView('3d');
     } else {
       sel = null;
@@ -1844,19 +1408,20 @@ window.addEventListener('keyup', e => {
 });
 
 window.addEventListener('resize', () => {
-  if (view === '2d') render2D();
-  else if (view === '3d') threeStudio?.resize();
-  else if (view === 'blueprint') blueprintRenderer?.render(home, home.currentFloorId);
+  if (view === '2d') {
+    if (planSubView === 'blueprint') blueprintRenderer?.render(home, home.currentFloorId);
+    else render2D();
+  } else if (view === '3d') {
+    threeStudio?.resize();
+  }
 });
 
-// Sidebar Event Delegations
 document.addEventListener('click', e => {
   const t = e.target.closest('button');
   if (!t) return;
 
   if (t.dataset.room) {
     sel = { kind: 'room', id: t.dataset.room };
-    activeStudioTool = null;
     commit();
   } else if (t.dataset.add) {
     addFurn(t.dataset.add);
@@ -1864,16 +1429,14 @@ document.addEventListener('click', e => {
     setTool(t.dataset.tool);
   } else if (t.dataset.cat) {
     currentFurnCategory = t.dataset.cat;
-    renderFurnCategoryTabs();
-    renderFurnGrid();
+    renderFurnitureTab();
   }
 });
 
-// ---------------- Boot RoomCraft 2.0 ----------------
+// ---------------- Initialize Application ----------------
 initModules();
-updateFloorSelector();
-renderFurnCategoryTabs();
-renderFurnGrid();
+renderFurnitureTab();
+renderDesignStylesTab();
 setTool('select');
 setView('2d');
 commit();

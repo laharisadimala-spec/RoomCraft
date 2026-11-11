@@ -3,106 +3,143 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RoomCraft 2.0 — Exhibition Edition</title>
+  <title>RoomCraft — Virtual Home Designer</title>
   <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
+  <!-- Top Navigation (Clean, minimal, uncluttered) -->
   <header>
-    <div class="brand-wrapper">
+    <div class="brand-group">
       <div class="brand">RoomCraft</div>
-      <span class="badge-edition">2.0 Exhibition</span>
+      <span class="badge-sub">Studio</span>
     </div>
 
-    <input id="name" aria-label="Home name" value="My home" title="Click to rename project">
+    <input id="name" aria-label="Project name" value="My home" title="Click to rename project">
+    <span id="saveStatus" class="save-status">✓ Saved</span>
 
-    <!-- View Modes -->
+    <div class="grow"></div>
+
+    <!-- Undo / Redo -->
+    <div class="history-group">
+      <button id="undo" title="Undo (Ctrl+Z)">↶</button>
+      <button id="redo" title="Redo (Ctrl+Y)">↷</button>
+    </div>
+
+    <!-- The 3 Primary Workspace Modes -->
     <div class="seg" role="tablist">
-      <button id="mode2" class="on" title="2D Interactive Drafting">2D Plan</button>
-      <button id="mode3" title="3D Realistic Studio">3D Studio</button>
-      <button id="modeBlueprint" title="Architectural Blueprint CAD Mode">Blueprint CAD</button>
+      <button id="mode2" class="on" title="2D Floor Planner">2D Planner</button>
+      <button id="mode3" title="3D Interior Studio">3D Studio</button>
       <button id="modeWalk" title="First-Person Walkthrough (WASD)">Walkthrough</button>
-      <button id="modePres" title="Exhibition Presentation Fullscreen">Presentation</button>
-    </div>
-
-    <!-- Studio Tools Bar -->
-    <div class="studio-tools-bar">
-      <button id="btnMakeover" class="btn-studio" title="Smart Room Makeover (8 Design Styles)">✨ Makeover</button>
-      <button id="btnLayout" class="btn-studio" title="Intelligent Furniture Layout Optimization">📐 Layout Engine</button>
-      <button id="btnLighting" class="btn-studio" title="Smart Lighting & Day/Night Simulator">☀️ Lighting</button>
-      <button id="btnMaterials" class="btn-studio" title="Material & Texture Studio">🎨 Materials</button>
-      <button id="btnFloors" class="btn-studio" title="Multi-Floor Architecture & Staircases">🏢 Multi-Floor</button>
-      <button id="btnExploded" class="btn-studio" title="Axonometric Exploded Building View">💥 Exploded 3D</button>
-      <button id="btnBudget" class="btn-studio" title="Interior Budget Planner (INR ₹)">💰 Budget</button>
-      <button id="btnAnalyzer" class="btn-studio" title="Design Quality & Clearance Analyzer">📊 Quality Audit</button>
-      <button id="btnMoodboard" class="btn-studio" title="Visual Moodboard Generator">🖼️ Moodboard</button>
-      <button id="btnCompare" class="btn-studio" title="Side-by-Side Design Variation Comparison">⚖️ Compare</button>
     </div>
 
     <div class="grow"></div>
 
-    <!-- Undo / Redo & Project Actions -->
-    <div class="header-actions">
-      <button id="undo" title="Undo (Ctrl+Z)">↶</button>
-      <button id="redo" title="Redo (Ctrl+Y)">↷</button>
-      <button id="btnProjects" title="Projects Index & Manager">📁 Projects</button>
-      <button id="btnVR" class="btn-studio" title="WebXR AR / VR Immersive Preview">🥽 VR/AR</button>
-      <button id="exportPng" title="Export High-Resolution Image">Export PNG</button>
-      <button id="exportJson" title="Save Project as JSON">Save JSON</button>
-      <label class="btn-like" title="Import JSON Project">Open JSON
-        <input id="importJson" type="file" accept="application/json" hidden>
-      </label>
+    <!-- Header Actions -->
+    <div class="nav-actions">
+      <button id="btnPreview" class="btn-primary" title="Launch Fullscreen Presentation Tour">▶ Preview</button>
+      <button id="btnExport" title="Export Image, Blueprint or File">Export</button>
+      <button id="btnSaveDetails" title="Save Project & View Details">Save &amp; Details</button>
     </div>
   </header>
 
-  <!-- Left Sidebar -->
+  <!-- Main Workspace Sidebar (Organized into 4 clear functional tabs) -->
   <aside class="left">
-    <!-- Multi-Floor Level Switcher -->
-    <div class="floor-nav-bar">
-      <div class="floor-select-wrap">
-        <label for="activeFloorSelect">Floor:</label>
-        <select id="activeFloorSelect"></select>
+    <div class="sidebar-tabs" role="tablist">
+      <button class="sb-tab on" data-sbtab="rooms">Rooms &amp; Walls</button>
+      <button class="sb-tab" data-sbtab="furniture">Furniture</button>
+      <button class="sb-tab" data-sbtab="design">Design &amp; Styles</button>
+      <button class="sb-tab" data-sbtab="smart">Smart Tools</button>
+    </div>
+
+    <!-- Tab 1: Rooms & Walls -->
+    <div id="tabRooms" class="sb-tab-content">
+      <h4>Wall &amp; Room Tools</h4>
+      <div class="tool-group">
+        <button class="item on" data-tool="select">Select &amp; Move <small>V</small></button>
+        <button class="item" data-tool="room">Draw Room <small>R</small></button>
+        <button class="item" data-tool="door">Add Door <small>D</small></button>
+        <button class="item" data-tool="window">Add Window <small>W</small></button>
       </div>
-      <button id="quickAddFloor" title="Add New Building Level" style="padding: 2px 7px; font-weight: bold;">+</button>
+
+      <h4>Rooms on this Floor</h4>
+      <div id="roomList"></div>
+
+      <h4>Starter Layouts</h4>
+      <div class="starter-templates">
+        <button id="tplShowcase" class="btn-subtle">🌟 Skyline Penthouse Showcase</button>
+        <button id="tpl2bhk" class="btn-subtle">🏠 Contemporary 2BHK Layout</button>
+        <button id="newBlank" class="btn-subtle">📄 Blank Canvas</button>
+      </div>
     </div>
 
-    <h4>Drafting Tools</h4>
-    <div class="tool-group">
-      <button class="item on" data-tool="select">Select &amp; Move <small>V</small></button>
-      <button class="item" data-tool="room">Draw Room <small>R</small></button>
-      <button class="item" data-tool="door">Add Door <small>D</small></button>
-      <button class="item" data-tool="window">Add Window <small>W</small></button>
+    <!-- Tab 2: Furniture Library -->
+    <div id="tabFurniture" class="sb-tab-content" hidden>
+      <div class="furn-cat-pills" id="furnCatTabs"></div>
+      <div class="furn-grid" id="furnList"></div>
     </div>
 
-    <h4>Rooms on this Floor</h4>
-    <div id="roomList"></div>
+    <!-- Tab 3: Design & Materials (Combined Design Studio) -->
+    <div id="tabDesign" class="sb-tab-content" hidden>
+      <p class="section-desc">Select an architectural style to transform colors, materials, and lighting in one click:</p>
+      <div id="designStylesGrid" class="design-styles-grid"></div>
 
-    <h4>Furniture &amp; Fixtures</h4>
-    <div class="furn-cat-tabs" id="furnCatTabs"></div>
-    <div class="furn-grid" id="furnList"></div>
+      <div style="margin-top:14px;">
+        <button id="btnViewMoodboard" class="btn-secondary" style="width:100%;">View Room Moodboard Card</button>
+      </div>
+    </div>
 
-    <h4>Starter Projects</h4>
-    <div style="display:flex; flex-direction:column; gap:4px;">
-      <button id="tplShowcase" class="primary" style="text-align:left; font-size:12px;">🌟 Showcase Penthouse (Exhibition)</button>
-      <button id="tpl2bhk" style="text-align:left; font-size:12px;">🏠 Contemporary 2BHK Template</button>
-      <button id="newBlank" style="text-align:left; font-size:12px;">📄 New Blank Canvas</button>
+    <!-- Tab 4: Smart Tools (Combined Layout Optimizer & Quality Audit) -->
+    <div id="tabSmart" class="sb-tab-content" hidden>
+      <div id="smartToolsContainer"></div>
     </div>
   </aside>
 
-  <!-- Center Main Canvas Viewport -->
+  <!-- Center Main Viewport -->
   <main>
     <canvas id="plan"></canvas>
     <canvas id="three" hidden></canvas>
     <canvas id="blueprint" hidden></canvas>
+
+    <!-- 2D View Option: Blueprint CAD Toggle Pill -->
+    <div id="planViewToggle" class="canvas-floating-pill">
+      <button id="btnPlanStandard" class="on">Standard Plan</button>
+      <button id="btnPlanBlueprint">Technical Blueprint CAD</button>
+    </div>
+
+    <!-- 3D Studio Floating Quick Dock (Lighting & Exploded View) -->
+    <div id="dock3D" class="dock-3d" hidden>
+      <div class="dock-3d-item">
+        <label>Ambiance:</label>
+        <select id="dockLightingPreset">
+          <option value="afternoon">Afternoon Daylight</option>
+          <option value="morning">Morning Golden Sun</option>
+          <option value="sunset">Sunset Golden Hour</option>
+          <option value="night">Cozy Night Mode</option>
+        </select>
+      </div>
+      <div class="dock-divider"></div>
+      <button id="btnDockExploded">💥 Exploded View</button>
+      <button id="btnDockResetCam">Reset Camera</button>
+    </div>
+
+    <!-- Exploded 3D Slider Dock -->
+    <div id="explodedOverlay" class="exploded-slider-overlay" hidden>
+      <label for="explodedSlider">Explosion Distance:</label>
+      <input type="range" id="explodedSlider" min="0" max="100" value="0">
+      <span id="explodedVal">0%</span>
+      <button id="btnExplodedToggle">Auto Animate</button>
+      <button id="btnExplodedClose">Close</button>
+    </div>
 
     <!-- Walkthrough HUD Overlay -->
     <div id="walkHud" class="walk-hud" hidden>
       <div class="walk-hud-top">
         <div class="walk-room-badge">
           <h2 id="walkCurrentRoom">Grand Living Room</h2>
-          <p>Walking elevation 1.6m · Eye-level apartment tour</p>
+          <p>Walking height 1.6m · Apartment Walkthrough</p>
         </div>
         <div class="walk-minimap-box">
-          <canvas id="walkMinimap" width="160" height="160"></canvas>
+          <canvas id="walkMinimap" width="150" height="150"></canvas>
         </div>
       </div>
       <div class="walk-hud-bottom">
@@ -110,10 +147,10 @@
           ⌨️ <b>WASD</b> / Arrows to Walk · <b>Mouse</b> Look · <b>Shift</b> Sprint · <b>ESC</b> Exit
         </div>
         <div class="walk-btns">
-          <button id="walkPrevRoom">◀ Prev Room</button>
-          <button id="walkTourToggle" class="primary">▶ Auto-Tour</button>
-          <button id="walkNextRoom">Next Room ▶</button>
-          <button id="walkReset">Reset Position</button>
+          <button id="walkPrevRoom">◀ Prev</button>
+          <button id="walkTourToggle" class="btn-primary">▶ Auto-Tour</button>
+          <button id="walkNextRoom">Next ▶</button>
+          <button id="walkReset">Reset</button>
           <button id="walkExit" class="danger">Exit Walkthrough ✕</button>
         </div>
       </div>
@@ -122,7 +159,7 @@
     <!-- Presentation Mode HUD Overlay -->
     <div id="presHud" class="pres-hud" hidden>
       <div class="pres-hud-top">
-        <div class="pres-brand-tag">RoomCraft 2.0 — Exhibition Showcase</div>
+        <div class="pres-brand-tag">RoomCraft — Design Showcase</div>
         <button id="presExit" class="danger" style="background:#fff;">Exit Presentation (ESC) ✕</button>
       </div>
       <div class="pres-hud-center-bottom">
@@ -130,53 +167,38 @@
           <h2 id="presRoomName">Grand Salon &amp; Foyer</h2>
           <div id="presRoomMeta" class="pres-meta">Area: 24.8 m² · Dimensions: 5.20m × 4.80m</div>
           <div id="presRoomDesc" class="pres-desc">
-            Luxurious interior styling featuring Italian Carrara marble, custom acoustic timber slats, and curated designer furnishings.
+            Architectural interior layout with optimized clearances, curated materials, and realistic lighting diffusion.
           </div>
         </div>
         <div class="pres-toolbar">
           <button id="presPrev">◀ Prev Room</button>
-          <button id="presPlayToggle" class="primary">⏸ Pause Tour</button>
+          <button id="presPlayToggle" class="btn-primary">⏸ Pause Tour</button>
           <button id="presNext">Next Room ▶</button>
         </div>
       </div>
     </div>
-
-    <!-- Exploded View Slider Overlay -->
-    <div id="explodedOverlay" class="exploded-slider-overlay" hidden>
-      <label for="explodedSlider">Axonometric Explosion Distance:</label>
-      <input type="range" id="explodedSlider" min="0" max="100" value="0">
-      <span id="explodedVal" style="font-weight:bold; font-size:12px; width:45px;">0%</span>
-      <button id="btnExplodedToggle" style="font-size:11.5px;">Auto Animate</button>
-      <button id="btnExplodedClose" style="font-size:11.5px;">Close</button>
-    </div>
   </main>
 
-  <!-- Right Sidebar / Studio Drawer -->
+  <!-- Contextual Properties Sidebar (Right) -->
   <aside class="right">
     <div class="panel-header">
-      <h3 id="panelTitle">Properties</h3>
-      <button id="panelClose" title="Reset to Item Properties" style="font-size:11px; padding:2px 8px;">Properties</button>
+      <h3 id="panelTitle">Contextual Properties</h3>
     </div>
     <div id="panel"></div>
   </aside>
 
-  <!-- Bottom Footer -->
+  <!-- Bottom Minimal Status Bar -->
   <footer>
-    <span class="hint">Drag canvas or hold Space to pan · Wheel to zoom · R rotates · Delete removes · Ctrl+Z / Ctrl+Y undo / redo</span>
+    <span class="hint">Space + Drag to pan · Scroll to zoom · R rotates · Delete removes · Ctrl+Z undo</span>
     <div class="grow"></div>
-    <div id="pillScore" class="footer-pill" title="Click to open Design Quality Audit">
-      <span class="score-dot"></span>
-      <span id="footerScoreLabel">Score: 92/100 (Optimal)</span>
-    </div>
-    <div id="pillBudget" class="footer-pill" title="Click to open Interior Budget Planner">
-      <span>₹</span>
-      <span id="footerBudgetLabel">Est. ₹3,84,000</span>
-    </div>
-    <span id="floorBadge" style="font-size:11.5px; font-weight:600; color:var(--wood);">Ground Floor</span>
-    <span id="status">All changes saved</span>
+    <button id="btnFooterDetails" class="footer-details-btn">
+      <span id="footerScoreBadge" class="footer-badge">Score: 92/100</span>
+      <span id="footerBudgetBadge" class="footer-badge">Est. ₹3,84,000</span>
+      <span style="font-weight:600; color:var(--wood);">Project Details &amp; Budget ↗</span>
+    </button>
   </footer>
 
-  <!-- Modal Dialog Backdrop Container -->
+  <!-- Modal Container for Project Details, Export, and Moodboards -->
   <div id="modalContainer" hidden></div>
 
   <script type="module" src="/src/main.js"></script>

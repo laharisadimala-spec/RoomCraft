@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 const textureCache = new Map();
 
-function createOffscreenCanvas(width = 512, height = 512) {
+function createOffscreenCanvas(width = 1024, height = 1024) {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -10,366 +10,521 @@ function createOffscreenCanvas(width = 512, height = 512) {
   return { canvas, ctx };
 }
 
-// Generate Oak Wood Plank texture
+// Generate Oak Wood Plank diffuse & bump map
 function generateWoodPlank(baseColor = '#cbab81') {
-  const { canvas, ctx } = createOffscreenCanvas(512, 512);
-  ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, 512, 512);
+  const { canvas, ctx } = createOffscreenCanvas(1024, 1024);
+  const bump = createOffscreenCanvas(1024, 1024);
 
-  // Planks
-  const plankH = 64;
-  for (let y = 0; y < 512; y += plankH) {
-    // Slight tone variation per plank
-    const tint = (Math.random() - 0.5) * 15;
+  // Diffuse
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  // Bump base
+  bump.ctx.fillStyle = '#808080';
+  bump.ctx.fillRect(0, 0, 1024, 1024);
+
+  const plankH = 128;
+  for (let y = 0; y < 1024; y += plankH) {
+    // Subtle per-plank tone variation
     ctx.fillStyle = `rgba(0, 0, 0, ${0.03 + Math.random() * 0.05})`;
-    ctx.fillRect(0, y, 512, plankH);
+    ctx.fillRect(0, y, 1024, plankH);
 
     // Fine wood grain lines
-    ctx.strokeStyle = `rgba(80, 50, 20, 0.12)`;
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 18; i++) {
+    ctx.strokeStyle = 'rgba(70, 45, 18, 0.14)';
+    bump.ctx.strokeStyle = 'rgba(40, 40, 40, 0.18)';
+    ctx.lineWidth = 1.2;
+    bump.ctx.lineWidth = 1.2;
+
+    for (let i = 0; i < 28; i++) {
       ctx.beginPath();
+      bump.ctx.beginPath();
       const gy = y + Math.random() * plankH;
       ctx.moveTo(0, gy);
-      ctx.bezierCurveTo(150, gy + (Math.random() - 0.5) * 8, 350, gy + (Math.random() - 0.5) * 8, 512, gy);
+      bump.ctx.moveTo(0, gy);
+      const cp1y = gy + (Math.random() - 0.5) * 12;
+      const cp2y = gy + (Math.random() - 0.5) * 12;
+      ctx.bezierCurveTo(300, cp1y, 700, cp2y, 1024, gy);
+      bump.ctx.bezierCurveTo(300, cp1y, 700, cp2y, 1024, gy);
       ctx.stroke();
+      bump.ctx.stroke();
     }
 
-    // Plank seam
-    ctx.strokeStyle = 'rgba(40, 25, 10, 0.4)';
-    ctx.lineWidth = 2;
+    // Horizontal plank groove seam
+    ctx.strokeStyle = 'rgba(25, 15, 8, 0.5)';
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(512, y);
+    ctx.lineTo(1024, y);
     ctx.stroke();
 
-    // Vertical butt joints
-    const staggeredOffset = (y / plankH) % 2 === 0 ? 256 : 128;
+    bump.ctx.strokeStyle = '#222222'; // deep recess
+    bump.ctx.lineWidth = 3;
+    bump.ctx.beginPath();
+    bump.ctx.moveTo(0, y);
+    bump.ctx.lineTo(1024, y);
+    bump.ctx.stroke();
+
+    // Staggered butt joints
+    const staggeredOffset = (y / plankH) % 2 === 0 ? 512 : 256;
     ctx.beginPath();
+    bump.ctx.beginPath();
     ctx.moveTo(staggeredOffset, y);
     ctx.lineTo(staggeredOffset, y + plankH);
-    if (staggeredOffset + 256 < 512) {
-      ctx.moveTo(staggeredOffset + 256, y);
-      ctx.lineTo(staggeredOffset + 256, y + plankH);
+    bump.ctx.moveTo(staggeredOffset, y);
+    bump.ctx.lineTo(staggeredOffset, y + plankH);
+    if (staggeredOffset + 512 < 1024) {
+      ctx.moveTo(staggeredOffset + 512, y);
+      ctx.lineTo(staggeredOffset + 512, y + plankH);
+      bump.ctx.moveTo(staggeredOffset + 512, y);
+      bump.ctx.lineTo(staggeredOffset + 512, y + plankH);
     }
     ctx.stroke();
+    bump.ctx.stroke();
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3, 3);
-  return texture;
+  const map = new THREE.CanvasTexture(canvas);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(3, 3);
+
+  const bumpMap = new THREE.CanvasTexture(bump.canvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(3, 3);
+
+  return { map, bumpMap };
 }
 
-// Generate Walnut Wood texture
+// Generate Walnut Wood diffuse & bump
 function generateWalnut(baseColor = '#5b402e') {
-  const { canvas, ctx } = createOffscreenCanvas(512, 512);
+  const { canvas, ctx } = createOffscreenCanvas(1024, 1024);
+  const bump = createOffscreenCanvas(1024, 1024);
+
   ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillRect(0, 0, 1024, 1024);
 
-  const plankH = 80;
-  for (let y = 0; y < 512; y += plankH) {
-    ctx.fillStyle = `rgba(0, 0, 0, ${0.04 + Math.random() * 0.06})`;
-    ctx.fillRect(0, y, 512, plankH);
+  bump.ctx.fillStyle = '#808080';
+  bump.ctx.fillRect(0, 0, 1024, 1024);
 
-    ctx.strokeStyle = `rgba(30, 15, 8, 0.22)`;
-    ctx.lineWidth = 1.5;
-    for (let i = 0; i < 22; i++) {
+  const plankH = 140;
+  for (let y = 0; y < 1024; y += plankH) {
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.05 + Math.random() * 0.05})`;
+    ctx.fillRect(0, y, 1024, plankH);
+
+    ctx.strokeStyle = 'rgba(25, 12, 5, 0.25)';
+    bump.ctx.strokeStyle = 'rgba(30, 30, 30, 0.2)';
+    ctx.lineWidth = 1.8;
+    bump.ctx.lineWidth = 1.8;
+
+    for (let i = 0; i < 30; i++) {
       ctx.beginPath();
+      bump.ctx.beginPath();
       const gy = y + Math.random() * plankH;
       ctx.moveTo(0, gy);
-      ctx.bezierCurveTo(180, gy + (Math.random() - 0.5) * 12, 360, gy + (Math.random() - 0.5) * 12, 512, gy);
+      bump.ctx.moveTo(0, gy);
+      ctx.bezierCurveTo(350, gy + (Math.random() - 0.5) * 16, 700, gy + (Math.random() - 0.5) * 16, 1024, gy);
+      bump.ctx.bezierCurveTo(350, gy + (Math.random() - 0.5) * 16, 700, gy + (Math.random() - 0.5) * 16, 1024, gy);
       ctx.stroke();
+      bump.ctx.stroke();
     }
 
-    ctx.strokeStyle = 'rgba(20, 10, 5, 0.5)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(15, 8, 4, 0.6)';
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(512, y);
+    ctx.lineTo(1024, y);
     ctx.stroke();
+
+    bump.ctx.strokeStyle = '#222222';
+    bump.ctx.lineWidth = 3;
+    bump.ctx.beginPath();
+    bump.ctx.moveTo(0, y);
+    bump.ctx.lineTo(1024, y);
+    bump.ctx.stroke();
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2);
-  return texture;
+  const map = new THREE.CanvasTexture(canvas);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(2, 2);
+
+  const bumpMap = new THREE.CanvasTexture(bump.canvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(2, 2);
+
+  return { map, bumpMap };
 }
 
 // Generate Carrara Italian Marble
 function generateMarble(baseColor = '#f0ece5') {
-  const { canvas, ctx } = createOffscreenCanvas(512, 512);
+  const { canvas, ctx } = createOffscreenCanvas(1024, 1024);
+  const bump = createOffscreenCanvas(1024, 1024);
+
   ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  bump.ctx.fillStyle = '#a0a0a0';
+  bump.ctx.fillRect(0, 0, 1024, 1024);
 
   // Soft flowing cloud gradients
-  for (let i = 0; i < 8; i++) {
-    const rx = Math.random() * 512;
-    const ry = Math.random() * 512;
-    const grad = ctx.createRadialGradient(rx, ry, 20, rx, ry, 180);
-    grad.addColorStop(0, 'rgba(180, 175, 170, 0.25)');
+  for (let i = 0; i < 12; i++) {
+    const rx = Math.random() * 1024;
+    const ry = Math.random() * 1024;
+    const grad = ctx.createRadialGradient(rx, ry, 30, rx, ry, 260);
+    grad.addColorStop(0, 'rgba(175, 170, 165, 0.28)');
     grad.addColorStop(1, 'rgba(240, 236, 229, 0)');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 512, 512);
+    ctx.fillRect(0, 0, 1024, 1024);
   }
 
   // Marble veins
-  ctx.strokeStyle = 'rgba(110, 105, 100, 0.22)';
-  for (let v = 0; v < 7; v++) {
-    ctx.lineWidth = 1 + Math.random() * 2.5;
+  ctx.strokeStyle = 'rgba(95, 90, 85, 0.28)';
+  for (let v = 0; v < 9; v++) {
+    ctx.lineWidth = 1 + Math.random() * 3.5;
     ctx.beginPath();
-    let sx = Math.random() * 512;
+    let sx = Math.random() * 1024;
     let sy = 0;
     ctx.moveTo(sx, sy);
-    for (let step = 0; step < 5; step++) {
-      sx += (Math.random() - 0.3) * 140;
-      sy += 110;
+    for (let step = 0; step < 6; step++) {
+      sx += (Math.random() - 0.3) * 220;
+      sy += 180;
       ctx.lineTo(sx, sy);
     }
     ctx.stroke();
   }
 
-  // Tile joints for marble slabs (256x256 slabs)
-  ctx.strokeStyle = 'rgba(160, 150, 140, 0.3)';
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(0, 0, 256, 256);
-  ctx.strokeRect(256, 0, 256, 256);
-  ctx.strokeRect(0, 256, 256, 256);
-  ctx.strokeRect(256, 256, 256, 256);
+  // Subtle tile joints for large format slabs (512x512)
+  ctx.strokeStyle = 'rgba(150, 140, 130, 0.35)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(0, 0, 512, 512);
+  ctx.strokeRect(512, 0, 512, 512);
+  ctx.strokeRect(0, 512, 512, 512);
+  ctx.strokeRect(512, 512, 512, 512);
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2);
-  return texture;
+  bump.ctx.strokeStyle = '#666666';
+  bump.ctx.lineWidth = 2;
+  bump.ctx.strokeRect(0, 0, 512, 512);
+  bump.ctx.strokeRect(512, 0, 512, 512);
+  bump.ctx.strokeRect(0, 512, 512, 512);
+  bump.ctx.strokeRect(512, 512, 512, 512);
+
+  const map = new THREE.CanvasTexture(canvas);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(2, 2);
+
+  const bumpMap = new THREE.CanvasTexture(bump.canvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(2, 2);
+
+  return { map, bumpMap };
 }
 
 // Generate Large Format Ceramic Tile
 function generateTileGrid(baseColor = '#ded8ce') {
-  const { canvas, ctx } = createOffscreenCanvas(512, 512);
+  const { canvas, ctx } = createOffscreenCanvas(1024, 1024);
+  const bump = createOffscreenCanvas(1024, 1024);
+
   ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillRect(0, 0, 1024, 1024);
 
-  // Subtle tile mottled noise
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
-  for (let i = 0; i < 400; i++) {
-    ctx.fillRect(Math.random() * 512, Math.random() * 512, 4, 4);
-  }
+  bump.ctx.fillStyle = '#a0a0a0';
+  bump.ctx.fillRect(0, 0, 1024, 1024);
 
-  // Rectified grout lines (4 tiles)
-  ctx.strokeStyle = 'rgba(100, 95, 88, 0.4)';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(2, 2, 252, 252);
-  ctx.strokeRect(258, 2, 252, 252);
-  ctx.strokeRect(2, 258, 252, 252);
-  ctx.strokeRect(258, 258, 252, 252);
+  // Rectified grout lines (4 large 512x512 tiles with beveled grout)
+  ctx.strokeStyle = 'rgba(85, 80, 72, 0.45)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(4, 4, 504, 504);
+  ctx.strokeRect(516, 4, 504, 504);
+  ctx.strokeRect(4, 516, 504, 504);
+  ctx.strokeRect(516, 516, 504, 504);
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2);
-  return texture;
+  bump.ctx.strokeStyle = '#333333';
+  bump.ctx.lineWidth = 4;
+  bump.ctx.strokeRect(4, 4, 504, 504);
+  bump.ctx.strokeRect(516, 4, 504, 504);
+  bump.ctx.strokeRect(4, 516, 504, 504);
+  bump.ctx.strokeRect(516, 516, 504, 504);
+
+  const map = new THREE.CanvasTexture(canvas);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(2, 2);
+
+  const bumpMap = new THREE.CanvasTexture(bump.canvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(2, 2);
+
+  return { map, bumpMap };
 }
 
-// Generate Polished Concrete / Microcement
+// Generate Polished Micro-Cement
 function generateConcrete(baseColor = '#b5b2ac') {
-  const { canvas, ctx } = createOffscreenCanvas(512, 512);
+  const { canvas, ctx } = createOffscreenCanvas(1024, 1024);
+  const bump = createOffscreenCanvas(1024, 1024);
+
   ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  bump.ctx.fillStyle = '#808080';
+  bump.ctx.fillRect(0, 0, 1024, 1024);
 
   // Micro-aggregate speckles
-  for (let i = 0; i < 800; i++) {
-    ctx.fillStyle = Math.random() > 0.5 ? 'rgba(50, 50, 50, 0.06)' : 'rgba(255, 255, 255, 0.08)';
-    ctx.fillRect(Math.random() * 512, Math.random() * 512, 2 + Math.random() * 3, 2 + Math.random() * 3);
+  for (let i = 0; i < 1500; i++) {
+    const isDark = Math.random() > 0.5;
+    ctx.fillStyle = isDark ? 'rgba(40, 40, 40, 0.08)' : 'rgba(255, 255, 255, 0.1)';
+    bump.ctx.fillStyle = isDark ? '#606060' : '#a0a0a0';
+    const sz = 2 + Math.random() * 4;
+    const px = Math.random() * 1024, py = Math.random() * 1024;
+    ctx.fillRect(px, py, sz, sz);
+    bump.ctx.fillRect(px, py, sz, sz);
   }
 
-  // Trowel swirl markings
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.04)';
-  ctx.lineWidth = 14;
-  for (let i = 0; i < 6; i++) {
-    ctx.beginPath();
-    ctx.arc(Math.random() * 512, Math.random() * 512, 100 + Math.random() * 100, 0, Math.PI * 0.7);
-    ctx.stroke();
-  }
+  const map = new THREE.CanvasTexture(canvas);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(3, 3);
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3, 3);
-  return texture;
+  const bumpMap = new THREE.CanvasTexture(bump.canvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(3, 3);
+
+  return { map, bumpMap };
 }
 
 // Generate Natural Stone Slate
 function generateStone(baseColor = '#636569') {
-  const { canvas, ctx } = createOffscreenCanvas(512, 512);
+  const { canvas, ctx } = createOffscreenCanvas(1024, 1024);
+  const bump = createOffscreenCanvas(1024, 1024);
+
   ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillRect(0, 0, 1024, 1024);
 
-  // Random stone slabs
-  ctx.strokeStyle = 'rgba(25, 25, 28, 0.5)';
-  ctx.lineWidth = 4;
-  ctx.strokeRect(0, 0, 320, 256);
-  ctx.strokeRect(320, 0, 192, 256);
-  ctx.strokeRect(0, 256, 200, 256);
-  ctx.strokeRect(200, 256, 312, 256);
+  bump.ctx.fillStyle = '#808080';
+  bump.ctx.fillRect(0, 0, 1024, 1024);
 
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-  ctx.fillRect(0, 0, 320, 256);
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
-  ctx.fillRect(320, 0, 192, 256);
+  ctx.strokeStyle = 'rgba(20, 20, 24, 0.6)';
+  ctx.lineWidth = 5;
+  ctx.strokeRect(0, 0, 640, 512);
+  ctx.strokeRect(640, 0, 384, 512);
+  ctx.strokeRect(0, 512, 400, 512);
+  ctx.strokeRect(400, 512, 624, 512);
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2);
-  return texture;
+  bump.ctx.strokeStyle = '#222222';
+  bump.ctx.lineWidth = 5;
+  bump.ctx.strokeRect(0, 0, 640, 512);
+  bump.ctx.strokeRect(640, 0, 384, 512);
+  bump.ctx.strokeRect(0, 512, 400, 512);
+  bump.ctx.strokeRect(400, 512, 624, 512);
+
+  const map = new THREE.CanvasTexture(canvas);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(2, 2);
+
+  const bumpMap = new THREE.CanvasTexture(bump.canvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(2, 2);
+
+  return { map, bumpMap };
 }
 
 // Generate Carpet Weave
 function generateCarpet(baseColor = '#cfc6b8') {
-  const { canvas, ctx } = createOffscreenCanvas(256, 256);
-  ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, 256, 256);
+  const { canvas, ctx } = createOffscreenCanvas(512, 512);
+  const bump = createOffscreenCanvas(512, 512);
 
-  // Cross-hatch micro weave
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(0, 0, 512, 512);
+
+  bump.ctx.fillStyle = '#808080';
+  bump.ctx.fillRect(0, 0, 512, 512);
+
   ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
-  for (let x = 0; x < 256; x += 4) {
-    for (let y = 0; y < 256; y += 4) {
-      if ((x + y) % 8 === 0) {
-        ctx.fillRect(x, y, 2, 2);
+  bump.ctx.fillStyle = '#606060';
+  for (let x = 0; x < 512; x += 6) {
+    for (let y = 0; y < 512; y += 6) {
+      if ((x + y) % 12 === 0) {
+        ctx.fillRect(x, y, 3, 3);
+        bump.ctx.fillRect(x, y, 3, 3);
       }
     }
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(6, 6);
-  return texture;
+  const map = new THREE.CanvasTexture(canvas);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(5, 5);
+
+  const bumpMap = new THREE.CanvasTexture(bump.canvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(5, 5);
+
+  return { map, bumpMap };
 }
 
-// Generate Brick Wall texture
+// Generate Brick Wall
 function generateBrick(baseColor = '#a3573c') {
-  const { canvas, ctx } = createOffscreenCanvas(512, 512);
-  ctx.fillStyle = '#c7bca9'; // mortar
-  ctx.fillRect(0, 0, 512, 512);
+  const { canvas, ctx } = createOffscreenCanvas(1024, 1024);
+  const bump = createOffscreenCanvas(1024, 1024);
 
-  const brickH = 48;
-  const brickW = 120;
-  const mortar = 6;
+  ctx.fillStyle = '#c7bca9';
+  ctx.fillRect(0, 0, 1024, 1024);
 
-  for (let row = 0; row < 12; row++) {
+  bump.ctx.fillStyle = '#444444'; // recessed mortar
+  bump.ctx.fillRect(0, 0, 1024, 1024);
+
+  const brickH = 76;
+  const brickW = 190;
+  const mortar = 8;
+
+  for (let row = 0; row < 14; row++) {
     const y = row * (brickH + mortar);
     const xOffset = (row % 2 === 0) ? 0 : -(brickW / 2);
-    for (let col = -1; col < 6; col++) {
+    for (let col = -1; col < 8; col++) {
       const x = col * (brickW + mortar) + xOffset;
-      // Brick color variation
-      const rVar = (Math.random() - 0.5) * 20;
       ctx.fillStyle = baseColor;
       ctx.fillRect(x, y, brickW, brickH);
       ctx.fillStyle = `rgba(0, 0, 0, ${0.05 + Math.random() * 0.08})`;
       ctx.fillRect(x, y, brickW, brickH);
+
+      bump.ctx.fillStyle = '#b0b0b0'; // raised brick surface
+      bump.ctx.fillRect(x, y, brickW, brickH);
     }
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2);
-  return texture;
+  const map = new THREE.CanvasTexture(canvas);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(2, 2);
+
+  const bumpMap = new THREE.CanvasTexture(bump.canvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(2, 2);
+
+  return { map, bumpMap };
 }
 
 // Generate Acoustic Wood Slat Paneling
 function generateWoodSlat(baseColor = '#99764d') {
-  const { canvas, ctx } = createOffscreenCanvas(512, 512);
-  ctx.fillStyle = '#1e1c18'; // dark acoustic backing felt
-  ctx.fillRect(0, 0, 512, 512);
+  const { canvas, ctx } = createOffscreenCanvas(1024, 1024);
+  const bump = createOffscreenCanvas(1024, 1024);
 
-  const slatW = 24;
-  const gap = 12;
+  ctx.fillStyle = '#1e1c18';
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  bump.ctx.fillStyle = '#333333';
+  bump.ctx.fillRect(0, 0, 1024, 1024);
+
+  const slatW = 36;
+  const gap = 18;
   const pitch = slatW + gap;
 
-  for (let x = 0; x < 512; x += pitch) {
+  for (let x = 0; x < 1024; x += pitch) {
     ctx.fillStyle = baseColor;
-    ctx.fillRect(x, 0, slatW, 512);
+    ctx.fillRect(x, 0, slatW, 1024);
 
-    // Subtle edge bevel shadow
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-    ctx.fillRect(x + slatW - 3, 0, 3, 512);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-    ctx.fillRect(x, 0, 2, 512);
+    bump.ctx.fillStyle = '#c0c0c0';
+    bump.ctx.fillRect(x, 0, slatW, 1024);
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2);
-  return texture;
+  const map = new THREE.CanvasTexture(canvas);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(2, 2);
+
+  const bumpMap = new THREE.CanvasTexture(bump.canvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(2, 2);
+
+  return { map, bumpMap };
 }
 
 // Generate Stucco / Venetian Plaster
 function generateStucco(baseColor = '#ece4d5') {
-  const { canvas, ctx } = createOffscreenCanvas(512, 512);
-  ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, 512, 512);
+  const { canvas, ctx } = createOffscreenCanvas(1024, 1024);
+  const bump = createOffscreenCanvas(1024, 1024);
 
-  // Soft trowel impressions
-  for (let i = 0; i < 300; i++) {
-    ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)';
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  bump.ctx.fillStyle = '#808080';
+  bump.ctx.fillRect(0, 0, 1024, 1024);
+
+  for (let i = 0; i < 400; i++) {
+    const isLight = Math.random() > 0.5;
+    ctx.fillStyle = isLight ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)';
+    bump.ctx.fillStyle = isLight ? '#989898' : '#686868';
     ctx.beginPath();
-    ctx.ellipse(Math.random() * 512, Math.random() * 512, 25, 12, Math.random() * Math.PI, 0, Math.PI * 2);
+    bump.ctx.beginPath();
+    const ex = Math.random() * 1024, ey = Math.random() * 1024;
+    ctx.ellipse(ex, ey, 35, 18, Math.random() * Math.PI, 0, Math.PI * 2);
+    bump.ctx.ellipse(ex, ey, 35, 18, Math.random() * Math.PI, 0, Math.PI * 2);
     ctx.fill();
+    bump.ctx.fill();
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3, 3);
-  return texture;
+  const map = new THREE.CanvasTexture(canvas);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(3, 3);
+
+  const bumpMap = new THREE.CanvasTexture(bump.canvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.repeat.set(3, 3);
+
+  return { map, bumpMap };
 }
 
-export function getProceduralTexture(type, color) {
+export function getProceduralPBR(type, color) {
   const key = `${type}_${color || 'default'}`;
   if (textureCache.has(key)) return textureCache.get(key);
 
-  let tex = null;
+  let result = null;
   switch (type) {
     case 'wood_plank':
-      tex = generateWoodPlank(color);
+      result = generateWoodPlank(color);
       break;
     case 'wood_walnut':
-      tex = generateWalnut(color);
+      result = generateWalnut(color);
       break;
     case 'marble':
-      tex = generateMarble(color);
+      result = generateMarble(color);
       break;
     case 'tile_grid':
-      tex = generateTileGrid(color);
+      result = generateTileGrid(color);
       break;
     case 'concrete':
-      tex = generateConcrete(color);
+      result = generateConcrete(color);
       break;
     case 'stone':
-      tex = generateStone(color);
+      result = generateStone(color);
       break;
     case 'carpet_weave':
-      tex = generateCarpet(color);
+      result = generateCarpet(color);
       break;
     case 'brick':
-      tex = generateBrick(color);
+      result = generateBrick(color);
       break;
     case 'wood_slat':
-      tex = generateWoodSlat(color);
+      result = generateWoodSlat(color);
       break;
     case 'stucco':
-      tex = generateStucco(color);
+      result = generateStucco(color);
       break;
     default:
       return null;
   }
 
-  textureCache.set(key, tex);
-  return tex;
+  textureCache.set(key, result);
+  return result;
 }

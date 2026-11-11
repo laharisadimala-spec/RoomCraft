@@ -1,0 +1,36 @@
+:root{--bg:#f6f2ea;--panel:#fbf9f4;--line:#e5ddcd;--ink:#3b3732;--muted:#8b8478;--wood:#8a6d4b}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{display:grid;grid-template-columns:230px 1fr 280px;grid-template-rows:56px 1fr 30px;height:100vh;font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg)}
+[hidden]{display:none!important}
+header{grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:0 16px;background:#fff;border-bottom:1px solid var(--line)}
+.brand{font:600 20px ui-serif,Georgia,serif;margin-right:8px}
+#name{width:180px;margin:0}
+aside{background:var(--panel);border-right:1px solid var(--line);padding:4px 16px 16px;overflow:auto}
+aside.right{border-right:0;border-left:1px solid var(--line)}
+h4{margin:18px 0 8px;font:600 12px system-ui,sans-serif;text-transform:none;color:var(--muted)}
+h3{margin:12px 0 8px;font:600 18px ui-serif,Georgia,serif}
+main{position:relative;overflow:hidden}
+main canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+button{font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
+button:hover{border-color:var(--wood)}
+button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+button.danger{color:#9a3b2e}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--wood);outline-offset:2px}
+.item{display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:6px;text-align:left;background:#fff}
+.item small{color:var(--muted)}
+.item.on{border-color:var(--wood);background:#f3ead9;color:var(--ink)}
+.btn-like{display:inline-block;border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:#fff;color:var(--ink);cursor:pointer;font-size:14px}
+label{display:block;margin:8px 0;color:var(--muted);font-size:12px}
+input,select{display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;color:var(--ink)}
+input[type=color]{height:34px;padding:2px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btns{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.meta,.empty,.hint,#status{color:var(--muted);font-size:12px}
+footer{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:0 16px;background:#fff;border-top:1px solid var(--line)}
+.grow{flex:1}
+.seg{display:flex}
+.seg button{border-radius:0}
+.seg button:first-child{border-radius:8px 0 0 8px}
+.seg button:last-child{border-radius:0 8px 8px 0}

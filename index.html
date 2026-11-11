@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoomCraft – Virtual Home Designer</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">RoomCraft</div>
+    <input id="name" aria-label="Home name" value="My home">
+    <button id="newBlank">New blank</button>
+    <button id="tpl2bhk">2BHK template</button>
+    <div class="grow"></div>
+    <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
+    <div class="seg">
+      <button id="mode2" class="on">2D</button>
+      <button id="mode3">3D</button>
+    </div>
+    <button id="exportPng">Export PNG</button>
+    <button id="exportJson">Save JSON</button>
+    <label class="btn-like">Open JSON
+      <input id="importJson" type="file" accept="application/json" hidden>
+    </label>
+  </header>
+
+  <aside>
+    <h4>Tools</h4>
+    <button class="item" data-tool="select">Select &amp; move <small>V</small></button>
+    <button class="item" data-tool="room">Draw room <small>R</small></button>
+    <h4>Rooms</h4>
+    <div id="roomList"></div>
+    <h4>Add furniture</h4>
+    <div id="furnList"></div>
+  </aside>
+
+  <main>
+    <canvas id="plan"></canvas>
+    <canvas id="three" hidden></canvas>
+  </main>
+
+  <aside class="right">
+    <h4>Properties</h4>
+    <div id="panel"></div>
+  </aside>
+
+  <footer>
+    <span class="hint">Drag empty space or hold Space to pan · Scroll to zoom · R rotates furniture · Delete removes · Ctrl+Z / Ctrl+Y undo / redo</span>
+    <div class="grow"></div>
+    <span id="status"></span>
+  </footer>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

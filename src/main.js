@@ -37,7 +37,8 @@ let tool = 'select'; // 'select' | 'room' | 'door' | 'window'
 let view = '2d'; // '2d' | '3d' | 'walk'
 let planSubView = 'standard'; // 'standard' | 'blueprint'
 let currentFurnCategory = 'living';
-let activeSidebarTab = 'rooms'; // 'rooms' | 'furniture' | 'design' | 'smart'
+let activeSidebarCategory = 'rooms'; // 'rooms' | 'furniture' | 'design' | 'smart'
+let furnSearchQuery = '';
 
 let spaceDown = false;
 let drag = null, pending = null;
@@ -140,7 +141,7 @@ function commit(rebuild3dScene = true) {
 
   // Render context-dependent sidebar contents
   renderSidebarRoomList();
-  if (activeSidebarTab === 'smart') renderSmartToolsTab();
+  if (activeSidebarCategory === 'smart') renderSmartToolsPanel();
 
   // Render Contextual Properties Inspector
   renderContextualProperties();
@@ -191,7 +192,7 @@ function render2D() {
   }
 
   planCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  planCtx.fillStyle = '#fcfbf8';
+  planCtx.fillStyle = '#f8f6f1';
   planCtx.fillRect(0, 0, W, H);
 
   const z = cam.zoom;
@@ -204,7 +205,7 @@ function render2D() {
 
   // 1-meter Grid lines
   planCtx.beginPath();
-  planCtx.strokeStyle = '#ebe5d8';
+  planCtx.strokeStyle = '#eae6dd';
   planCtx.lineWidth = 1 / z;
   for (let x = Math.floor(x0 / 100) * 100; x < x1; x += 100) {
     planCtx.moveTo(x, y0);
@@ -271,7 +272,7 @@ function render2D() {
         planCtx.fillStyle = '#ffffff';
         planCtx.textAlign = 'center';
         planCtx.textBaseline = 'middle';
-        planCtx.font = `600 ${Math.max(9, Math.min(13, 11 / z))}px system-ui, sans-serif`;
+        planCtx.font = `600 ${Math.max(9, Math.min(13, 11 / z))}px Inter, sans-serif`;
         planCtx.fillText(f.label || f.type, 0, 0);
       }
     }
@@ -288,13 +289,13 @@ function render2D() {
     planCtx.lineWidth = 1 / z;
     planCtx.strokeRect(r.x, r.y, r.w, r.h);
 
-    planCtx.fillStyle = '#2b2823';
+    planCtx.fillStyle = '#34332f';
     planCtx.textAlign = 'center';
-    planCtx.font = `700 ${15 / z}px ui-serif, Georgia, serif`;
+    planCtx.font = `700 ${14 / z}px Inter, sans-serif`;
     planCtx.fillText(r.name, r.x + r.w / 2, r.y + r.h / 2 - 5 / z);
 
-    planCtx.font = `500 ${12 / z}px system-ui, sans-serif`;
-    planCtx.fillStyle = '#7a7265';
+    planCtx.font = `500 ${11 / z}px Inter, sans-serif`;
+    planCtx.fillStyle = '#7a756c';
     planCtx.fillText(
       `${(r.w / 100).toFixed(2)} × ${(r.h / 100).toFixed(2)} m · ${(r.w * r.h / 10000).toFixed(1)} m²`,
       r.x + r.w / 2,
@@ -329,9 +330,9 @@ function render2D() {
     planCtx.lineWidth = 2 / z;
     planCtx.strokeRect(x, y, w, h);
     planCtx.setLineDash([]);
-    planCtx.fillStyle = '#2b2823';
+    planCtx.fillStyle = '#34332f';
     planCtx.textAlign = 'center';
-    planCtx.font = `600 ${12 / z}px system-ui, sans-serif`;
+    planCtx.font = `600 ${12 / z}px Inter, sans-serif`;
     planCtx.fillText(`${(w / 100).toFixed(2)} × ${(h / 100).toFixed(2)} m`, x + w / 2, y + h / 2);
   }
 
@@ -506,10 +507,10 @@ function setView(newView) {
   blueprintCanvas.hidden = view !== '2d' || planSubView !== 'blueprint';
   threeCanvas.hidden = view === '2d';
 
-  // 2D subview pill only visible in 2D mode
-  $('planViewToggle').hidden = view !== '2d';
+  // 2D Floating dock only in 2D mode
+  $('floatingPlanBar').hidden = view !== '2d';
 
-  // 3D Quick Dock only visible in 3D mode
+  // 3D Floating dock only in 3D mode
   $('dock3D').hidden = view !== '3d';
   $('explodedOverlay').hidden = true;
 
@@ -546,7 +547,7 @@ $('mode2').onclick = () => setView('2d');
 $('mode3').onclick = () => setView('3d');
 $('modeWalk').onclick = () => setView('walk');
 
-// 2D Blueprint Subview Pill Toggle
+// 2D Plan Floating Dock Actions
 $('btnPlanStandard').onclick = () => {
   planSubView = 'standard';
   $('btnPlanStandard').classList.add('on');
@@ -563,8 +564,17 @@ $('btnPlanBlueprint').onclick = () => {
   blueprintCanvas.hidden = false;
   blueprintRenderer.render(home, home.currentFloorId);
 };
+$('btnFitPlan').onclick = () => fit2D();
+$('btnZoomIn').onclick = () => {
+  cam.zoom = clamp(cam.zoom * 1.2, 0.15, 3.5);
+  render2D();
+};
+$('btnZoomOut').onclick = () => {
+  cam.zoom = clamp(cam.zoom * 0.8, 0.15, 3.5);
+  render2D();
+};
 
-// 3D Quick Dock Actions
+// 3D Floating Dock Actions
 $('dockLightingPreset').addEventListener('change', e => {
   lightingSim.setPreset(e.target.value, home);
   commit(false);
@@ -577,9 +587,7 @@ $('btnDockExploded').onclick = () => {
     explodedController.setProgress(0);
   }
 };
-$('btnDockResetCam').onclick = () => {
-  threeStudio.frameScene(home);
-};
+$('btnDockResetCam').onclick = () => threeStudio.frameScene(home);
 
 // Exploded Slider Actions
 $('explodedSlider').addEventListener('input', e => {
@@ -622,6 +630,7 @@ $('btnPreview').onclick = () => {
   blueprintCanvas.hidden = true;
   $('walkHud').hidden = true;
   $('dock3D').hidden = true;
+  $('floatingPlanBar').hidden = true;
   $('presHud').hidden = false;
 
   threeStudio.resize();
@@ -643,29 +652,50 @@ $('presPlayToggle').onclick = () => {
   $('presPlayToggle').textContent = isPlaying ? '⏸ Pause Tour' : '▶ Play Tour';
 };
 
-// ---------------- Sidebar Tabs (4 Primary Sections) ----------------
-document.querySelectorAll('.sb-tab').forEach(tabBtn => {
-  tabBtn.addEventListener('click', () => {
-    document.querySelectorAll('.sb-tab').forEach(b => b.classList.remove('on'));
-    tabBtn.classList.add('on');
-    activeSidebarTab = tabBtn.dataset.sbtab;
+// ---------------- Sidebar Tabs & Panels ----------------
+document.querySelectorAll('.sb-category-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sb-category-btn').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    activeSidebarCategory = btn.dataset.cat;
 
-    $('tabRooms').hidden = activeSidebarTab !== 'rooms';
-    $('tabFurniture').hidden = activeSidebarTab !== 'furniture';
-    $('tabDesign').hidden = activeSidebarTab !== 'design';
-    $('tabSmart').hidden = activeSidebarTab !== 'smart';
+    $('panelRooms').hidden = activeSidebarCategory !== 'rooms';
+    $('panelFurniture').hidden = activeSidebarCategory !== 'furniture';
+    $('panelDesign').hidden = activeSidebarCategory !== 'design';
+    $('panelSmart').hidden = activeSidebarCategory !== 'smart';
 
-    if (activeSidebarTab === 'furniture') {
-      renderFurnitureTab();
-    } else if (activeSidebarTab === 'design') {
-      renderDesignStylesTab();
-    } else if (activeSidebarTab === 'smart') {
-      renderSmartToolsTab();
+    if (activeSidebarCategory === 'furniture') {
+      renderFurniturePanel();
+    } else if (activeSidebarCategory === 'design') {
+      renderDesignStylesPanel();
+    } else if (activeSidebarCategory === 'smart') {
+      renderSmartToolsPanel();
     }
   });
 });
 
-// Tab 1: Rooms & Walls
+// Sidebar Collapsible Toggles
+$('btnToggleLeftSidebar').onclick = () => {
+  document.body.classList.toggle('left-collapsed');
+  const isCollapsed = document.body.classList.contains('left-collapsed');
+  $('btnToggleLeftSidebar').textContent = isCollapsed ? '▶' : '◀';
+  setTimeout(() => {
+    if (view === '2d') fit2D();
+    else if (view === '3d') threeStudio?.resize();
+  }, 240);
+};
+
+$('btnToggleRightSidebar').onclick = () => {
+  document.body.classList.toggle('right-collapsed');
+  const isCollapsed = document.body.classList.contains('right-collapsed');
+  $('btnToggleRightSidebar').textContent = isCollapsed ? '◀' : '▶';
+  setTimeout(() => {
+    if (view === '2d') fit2D();
+    else if (view === '3d') threeStudio?.resize();
+  }, 240);
+};
+
+// Category A: Rooms & Walls
 function setTool(t) {
   tool = t;
   document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
@@ -675,32 +705,47 @@ function setTool(t) {
 function renderSidebarRoomList() {
   const activeRooms = home.rooms.filter(r => r.floorId === home.currentFloorId);
   $('roomList').innerHTML = activeRooms.map(r =>
-    `<button class="item ${sel?.id === r.id ? 'on' : ''}" data-room="${r.id}">
-      <span><b>${esc(r.name)}</b></span>
-      <small>${(r.w / 100).toFixed(1)}×${(r.h / 100).toFixed(1)} m · ${(r.w * r.h / 10000).toFixed(1)} m²</small>
+    `<button class="room-item ${sel?.id === r.id ? 'on' : ''}" data-room="${r.id}">
+      <span class="room-item-title">${esc(r.name)}</span>
+      <span class="room-item-meta">${(r.w / 100).toFixed(1)}×${(r.h / 100).toFixed(1)} m · ${(r.w * r.h / 10000).toFixed(1)} m²</span>
     </button>`
-  ).join('') || '<p class="section-desc">No rooms yet on this level. Click "Draw Room" or load a starter template.</p>';
+  ).join('') || '<div class="section-hint">No rooms on this floor yet. Choose "Draw Room" above.</div>';
 }
 
 $('tplShowcase').onclick = () => loadHome(templateExhibitionShowcase());
 $('tpl2bhk').onclick = () => loadHome(template2bhk());
 $('newBlank').onclick = () => loadHome(blankHome());
 
-// Tab 2: Furniture Library
-function renderFurnitureTab() {
+// Category B: Furniture Library
+function renderFurniturePanel() {
   $('furnCatTabs').innerHTML = FURN_CATEGORIES.map(cat =>
     `<button class="furn-pill ${cat.id === currentFurnCategory ? 'active' : ''}" data-cat="${cat.id}">${cat.label}</button>`
   ).join('');
 
-  const filtered = Object.entries(FURN).filter(([k, v]) => v.category === currentFurnCategory);
+  filterAndRenderFurniture();
+}
+
+function filterAndRenderFurniture() {
+  const query = furnSearchQuery.trim().toLowerCase();
+  const filtered = Object.entries(FURN).filter(([k, v]) => {
+    const matchesCat = v.category === currentFurnCategory;
+    const matchesQuery = !query || v.label.toLowerCase().includes(query) || k.toLowerCase().includes(query);
+    return matchesCat && matchesQuery;
+  });
+
   $('furnList').innerHTML = filtered.map(([k, v]) => `
-    <button class="furn-card" data-add="${k}">
+    <button class="furn-card" data-add="${k}" draggable="true">
       <span class="title">${v.label}</span>
       <span class="dim">${v.w}×${v.d} cm</span>
       <span class="price">₹${(v.price || 15000).toLocaleString('en-IN')}</span>
     </button>
   `).join('');
 }
+
+$('furnSearch').addEventListener('input', e => {
+  furnSearchQuery = e.target.value;
+  filterAndRenderFurniture();
+});
 
 function addFurn(type) {
   const before = JSON.stringify(home);
@@ -717,8 +762,8 @@ function addFurn(type) {
   commit();
 }
 
-// Tab 3: Design & Materials (Combined Design Studio)
-function renderDesignStylesTab() {
+// Category C: Design & Materials
+function renderDesignStylesPanel() {
   const styles = makeoverEngine.getStyles();
   const targetRoom = (sel?.kind === 'room' && selItem()) || home.rooms[0];
 
@@ -741,7 +786,7 @@ function renderDesignStylesTab() {
         makeoverEngine.applyMakeover(res, home);
         record(before);
         commit();
-        setStatus(`Applied ${res.style.name} Makeover`);
+        setStatus(`Applied ${res.style.name} Style`);
       }
     });
   });
@@ -761,40 +806,40 @@ $('btnViewMoodboard').onclick = () => {
         <button id="modalClose">✕</button>
       </div>
       <div class="modal-body">
-        <p style="font-size:12.5px; color:var(--muted); font-style:italic; margin-bottom:14px;">"${mb.themeTagline}"</p>
+        <p style="font-size:12px; color:var(--text-secondary); font-style:italic; margin-bottom:14px;">"${mb.themeTagline}"</p>
         
         <h4 style="margin-bottom:6px;">Color Palette</h4>
         <div style="display:flex; gap:6px; margin-bottom:16px;">
           ${mb.palette.map(p => `
             <div style="flex:1; text-align:center;">
-              <div style="height:36px; border-radius:6px; background:${p.hex}; border:1px solid #ddd;"></div>
+              <div style="height:34px; border-radius:6px; background:${p.hex}; border:1px solid #ddd;"></div>
               <div style="font-size:10px; font-weight:600; margin-top:3px;">${p.hex.toUpperCase()}</div>
-              <div style="font-size:9px; color:var(--muted);">${p.label}</div>
+              <div style="font-size:9px; color:var(--text-muted);">${p.label}</div>
             </div>
           `).join('')}
         </div>
 
-        <div class="row2" style="margin-bottom:14px;">
-          <div style="background:#f7f4ee; padding:10px; border-radius:8px;">
+        <div class="row-2" style="margin-bottom:14px;">
+          <div style="background:var(--bg-subtle); padding:10px; border-radius:8px;">
             <b>Floor Surface:</b> ${mb.floorMaterial.label}
           </div>
-          <div style="background:#f7f4ee; padding:10px; border-radius:8px;">
+          <div style="background:var(--bg-subtle); padding:10px; border-radius:8px;">
             <b>Wall Finish:</b> ${mb.wallMaterial.label}
           </div>
         </div>
 
-        <h4>Inventory &amp; Fixtures (${mb.furnitureList.length} items)</h4>
-        <div style="max-height:140px; overflow-y:auto; border:1px solid var(--line); border-radius:6px; background:#fff; margin-bottom:14px;">
+        <h4>Curated Pieces (${mb.furnitureList.length})</h4>
+        <div style="max-height:140px; overflow-y:auto; border:1px solid var(--border-subtle); border-radius:6px; background:#fff; margin-bottom:14px;">
           ${mb.furnitureList.map(f => `
-            <div style="display:flex; justify-content:space-between; padding:5px 8px; border-bottom:1px solid var(--line); font-size:11.5px;">
+            <div style="display:flex; justify-content:space-between; padding:5px 8px; border-bottom:1px solid var(--border-subtle); font-size:11.5px;">
               <span>${f.label}</span>
-              <span style="color:var(--muted);">${f.dimensions}</span>
+              <span style="color:var(--text-muted);">${f.dimensions}</span>
             </div>
           `).join('')}
         </div>
       </div>
       <div class="modal-footer">
-        <button id="btnDlMoodboard" class="btn-primary">Download Moodboard Image (PNG)</button>
+        <button id="btnDlMoodboard" class="btn-primary">Download Moodboard (PNG)</button>
         <button id="btnCloseMb">Close</button>
       </div>
     </div>
@@ -811,11 +856,11 @@ $('btnViewMoodboard').onclick = () => {
   };
 };
 
-// Tab 4: Smart Tools (Combined Layout Optimizer & Quality Audit)
-function renderSmartToolsTab() {
+// Category D: Smart Tools
+function renderSmartToolsPanel() {
   const targetRoom = (sel?.kind === 'room' && selItem()) || home.rooms[0];
   if (!targetRoom) {
-    $('smartToolsContainer').innerHTML = '<p class="section-desc">Create or select a room to evaluate layout and design quality.</p>';
+    $('smartToolsContainer').innerHTML = '<div class="section-hint">Select a room to evaluate layout and quality.</div>';
     return;
   }
 
@@ -823,29 +868,31 @@ function renderSmartToolsTab() {
   const audit = analyzer.analyze(home, targetRoom.id);
 
   $('smartToolsContainer').innerHTML = `
-    <div style="background:#f4eee2; padding:10px; border-radius:8px; margin-bottom:12px;">
-      <span style="font-size:10.5px; font-weight:700; color:var(--wood); text-transform:uppercase;">Evaluated Room:</span>
-      <h3 style="margin:2px 0; font-size:15px;">${esc(targetRoom.name)}</h3>
-      <span style="font-size:11.5px; color:var(--muted);">${(targetRoom.w * targetRoom.h / 10000).toFixed(1)} m² · Design Score: <b>${audit.overallScore}/100</b> (${audit.rating})</span>
+    <div style="background:var(--bg-subtle); padding:10px; border-radius:8px; margin-bottom:12px;">
+      <div class="section-title">Selected Room:</div>
+      <h3 style="margin:2px 0; font-size:14px;">${esc(targetRoom.name)}</h3>
+      <div style="font-size:11px; color:var(--text-muted);">
+        ${(targetRoom.w * targetRoom.h / 10000).toFixed(1)} m² · Design Score: <b>${audit.overallScore}/100</b> (${audit.rating})
+      </div>
     </div>
 
-    <h4>Layout Optimization Suggestions</h4>
-    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;">
+    <div class="section-title">Smart Furniture Arrangements</div>
+    <div style="display:flex; flex-direction:column; gap:8px; margin:6px 0 14px;">
       ${layouts.map((l, idx) => `
-        <div class="style-card" style="padding:10px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+        <div class="style-card" style="padding:8px 10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
             <span class="badge">${l.badge}</span>
-            <b style="color:var(--wood); font-size:12px;">Score: ${l.score}/100</b>
+            <b style="color:var(--accent-wood); font-size:11.5px;">Efficiency: ${l.score}/100</b>
           </div>
           <div style="font-weight:600; font-size:12px;">${l.title}</div>
-          <div style="font-size:11px; color:var(--muted); margin:3px 0 6px;">${l.rationale.slice(0, 95)}...</div>
-          <button class="btn-primary btn-apply-smart-layout" data-idx="${idx}" style="font-size:11px; padding:3px 8px; width:100%;">Apply This Layout</button>
+          <div style="font-size:11px; color:var(--text-muted); margin:2px 0 6px;">${l.rationale.slice(0, 90)}...</div>
+          <button class="btn-primary btn-apply-smart-layout" data-idx="${idx}" style="font-size:11px; padding:3px 8px; width:100%;">Apply Arrangement</button>
         </div>
       `).join('')}
     </div>
 
-    <h4>Design Quality Audit Breakdown</h4>
-    <div style="margin-bottom:12px;">
+    <div class="section-title">Quality &amp; Clearance Checks</div>
+    <div style="margin:6px 0 12px;">
       ${audit.categories.map(c => `
         <div class="score-bar-group">
           <div class="score-bar-label">
@@ -853,18 +900,18 @@ function renderSmartToolsTab() {
             <b>${c.score}/100</b>
           </div>
           <div class="score-track">
-            <div class="score-fill" style="width:${c.score}%; background:${c.score >= 80 ? 'var(--accent-green)' : c.score >= 60 ? 'var(--accent-gold)' : 'var(--accent-red)'};"></div>
+            <div class="score-fill" style="width:${c.score}%; background:${c.score >= 80 ? 'var(--accent-sage)' : c.score >= 60 ? 'var(--accent-gold)' : 'var(--accent-red)'};"></div>
           </div>
         </div>
       `).join('')}
     </div>
 
     ${audit.warnings.length > 0 ? `
-      <h4>Detected Issues (${audit.warnings.length})</h4>
-      <div style="margin-bottom:10px;">
+      <div class="section-title">Detected Issues (${audit.warnings.length})</div>
+      <div style="margin-top:6px;">
         ${audit.warnings.map(w => `<div class="warning-pill ${w.severity}">${w.message}</div>`).join('')}
       </div>
-    ` : '<div class="warning-pill tip">✓ No collisions or clearance violations detected!</div>'}
+    ` : '<div class="warning-pill tip">✓ Clear corridors and zero collisions detected!</div>'}
   `;
 
   $('smartToolsContainer').querySelectorAll('.btn-apply-smart-layout').forEach(b => {
@@ -883,19 +930,19 @@ function renderSmartToolsTab() {
   });
 }
 
-// ---------------- Contextual Right Sidebar Inspector ----------------
+// ---------------- Contextual Right Properties Inspector ----------------
 function renderContextualProperties() {
   const it = selItem();
 
   if (it) {
     if (sel.kind === 'room') {
-      panelTitle.textContent = 'Room Properties';
+      panelTitle.textContent = 'Room Settings';
       const floorMat = FLOOR_MATERIALS[it.floorMaterial] || FLOOR_MATERIALS.oakWood;
       const wallMat = WALL_MATERIALS[it.wallMaterial] || WALL_MATERIALS.whitePaint;
 
       panel.innerHTML = `
         <label>Room Name<input data-k="name" value="${esc(it.name)}"></label>
-        <div class="row2">
+        <div class="row-2">
           <label>Width (cm)<input type="number" step="10" min="80" data-k="w" value="${it.w}"></label>
           <label>Length (cm)<input type="number" step="10" min="80" data-k="h" value="${it.h}"></label>
         </div>
@@ -915,72 +962,67 @@ function renderContextualProperties() {
         </label>
         <label>Wall Tint Color<input type="color" data-k="wall" value="${it.wall || wallMat.color}"></label>
 
-        <div style="background:#f5efe6; padding:8px 10px; border-radius:6px; margin:12px 0; font-size:11.5px; font-weight:600;">
+        <div style="background:var(--bg-subtle); padding:7px 10px; border-radius:6px; margin:10px 0; font-size:11.5px; font-weight:600;">
           Area: ${(it.w * it.h / 10000).toFixed(2)} m² [${Math.round((it.w * it.h / 10000) * 10.7639)} sq.ft]
         </div>
 
-        <div class="btns">
+        <div class="btn-row">
           <button data-act="dup">Duplicate</button>
-          <button class="danger" data-act="del">Delete</button>
+          <button class="btn-danger" data-act="del">Delete</button>
         </div>
       `;
     } else {
-      panelTitle.textContent = 'Furniture Properties';
+      panelTitle.textContent = 'Furniture Settings';
       panel.innerHTML = `
-        <h4 style="margin:0 0 8px; font-size:13px; text-transform:none; color:var(--ink);">${esc(it.label || it.type)}</h4>
-        <div class="row2">
+        <div style="font-weight:700; font-size:13px; margin-bottom:8px;">${esc(it.label || it.type)}</div>
+        <div class="row-2">
           <label>Width (cm)<input type="number" step="5" min="10" data-k="w" value="${it.w}"></label>
           <label>Depth (cm)<input type="number" step="5" min="10" data-k="d" value="${it.d}"></label>
         </div>
-        <div class="row2">
+        <div class="row-2">
           <label>Height (cm)<input type="number" step="5" min="10" data-k="h" value="${it.h}"></label>
           <label>Rotation (°)<input type="number" step="90" data-k="rot" value="${it.rot || 0}"></label>
         </div>
         <label>Color Tint<input type="color" data-k="color" value="${it.color || '#9c7a52'}"></label>
-        <label>Estimated Price (₹)<input type="number" step="1000" data-k="price" value="${it.price || 15000}"></label>
+        <label>Price (₹)<input type="number" step="1000" data-k="price" value="${it.price || 15000}"></label>
 
-        <div class="btns">
+        <div class="btn-row">
           <button data-act="rot">Rotate 90°</button>
           <button data-act="dup">Duplicate</button>
-          <button class="danger" data-act="del">Delete</button>
+          <button class="btn-danger" data-act="del">Delete</button>
         </div>
       `;
     }
   } else {
-    // Contextual summary when nothing is selected
+    // When nothing is selected
     if (view === '3d') {
-      panelTitle.textContent = '3D Studio Environment';
+      panelTitle.textContent = '3D Environment';
       const lighting = home.lighting || {};
       panel.innerHTML = `
-        <p class="section-desc">Customize natural solar lighting, shadows, and ambiance:</p>
+        <div class="section-title">Solar &amp; Ambient Lighting</div>
         
-        <label>Day / Night Solar Time</label>
+        <label>Time of Day Preset</label>
         <select id="pnlSelectLighting">
           <option value="afternoon" ${lighting.preset === 'afternoon' ? 'selected' : ''}>Afternoon Daylight (1:30 PM)</option>
           <option value="morning" ${lighting.preset === 'morning' ? 'selected' : ''}>Morning Golden Hour (8:30 AM)</option>
           <option value="sunset" ${lighting.preset === 'sunset' ? 'selected' : ''}>Sunset Dusk (6:15 PM)</option>
-          <option value="night" ${lighting.preset === 'night' ? 'selected' : ''}>Night Ambiance (9:45 PM)</option>
+          <option value="night" ${lighting.preset === 'night' ? 'selected' : ''}>Night Mode (9:45 PM)</option>
         </select>
 
         <label>Sunlight Intensity (${(lighting.sunIntensity ?? 2.1).toFixed(1)}x)
           <input type="range" id="pnlSunInt" min="0" max="35" value="${Math.round((lighting.sunIntensity ?? 2.1) * 10)}">
         </label>
 
-        <label>Color Warmth Preset</label>
-        <div class="row3">
-          <button class="btn-subtle btn-temp ${lighting.colorTemp === 'warm' ? 'on' : ''}" data-temp="warm">Warm</button>
-          <button class="btn-subtle btn-temp ${lighting.colorTemp === 'neutral' ? 'on' : ''}" data-temp="neutral">Neutral</button>
-          <button class="btn-subtle btn-temp ${lighting.colorTemp === 'cool' ? 'on' : ''}" data-temp="cool">Cool</button>
+        <label>Light Warmth</label>
+        <div class="row-3">
+          <button class="btn-temp ${lighting.colorTemp === 'warm' ? 'btn-primary' : ''}" data-temp="warm">Warm</button>
+          <button class="btn-temp ${lighting.colorTemp === 'neutral' ? 'btn-primary' : ''}" data-temp="neutral">Neutral</button>
+          <button class="btn-temp ${lighting.colorTemp === 'cool' ? 'btn-primary' : ''}" data-temp="cool">Cool</button>
         </div>
 
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px;">
           <label style="margin:0;">Soft Shadows</label>
-          <input type="checkbox" id="pnlChkShadow" ${lighting.shadows !== false ? 'checked' : ''} style="width:18px; height:18px;">
-        </div>
-
-        <div style="margin-top:20px; padding:10px; background:#f4eee2; border-radius:8px;">
-          <span style="font-size:11.5px; font-weight:600; color:var(--wood);">💡 Tip:</span>
-          <p style="font-size:11px; color:var(--muted); margin-top:3px;">Click on any room or furniture piece in 3D to edit finishes and dimensions directly.</p>
+          <input type="checkbox" id="pnlChkShadow" ${lighting.shadows !== false ? 'checked' : ''} style="width:16px; height:16px;">
         </div>
       `;
 
@@ -1003,31 +1045,27 @@ function renderContextualProperties() {
         lightingSim.setParam('shadows', e.target.checked, home);
       });
     } else {
-      panelTitle.textContent = 'Floor Overview';
+      panelTitle.textContent = 'Space Overview';
       const activeRooms = home.rooms.filter(r => r.floorId === home.currentFloorId);
       const totalArea = activeRooms.reduce((s, r) => s + (r.w * r.h) / 10000, 0);
 
       panel.innerHTML = `
-        <div style="background:#f5efe6; padding:12px; border-radius:8px; margin-bottom:12px;">
-          <div style="font-size:11px; font-weight:700; color:var(--wood); text-transform:uppercase;">Current Level:</div>
-          <h3 style="margin:3px 0 6px;">${esc(floorManager.getActiveFloor(home).name)}</h3>
-          <div style="font-size:12px; color:var(--ink-soft);">
+        <div style="background:var(--bg-subtle); padding:10px; border-radius:8px; margin-bottom:12px;">
+          <div class="section-title">Current Level:</div>
+          <h3 style="margin:2px 0 4px; font-size:14px;">${esc(floorManager.getActiveFloor(home).name)}</h3>
+          <div style="font-size:11.5px; color:var(--text-secondary);">
             ${activeRooms.length} Rooms · ${totalArea.toFixed(1)} m² [${Math.round(totalArea * 10.7639)} sq.ft]
           </div>
         </div>
 
-        <p class="section-desc">Click any room or furniture piece on the floor plan to inspect its dimensions, change materials, rotate, or duplicate.</p>
+        <div class="section-hint">Click any room or furniture item on the plan to inspect dimensions, rotate, change materials, or duplicate.</div>
 
-        <div style="margin-top:16px; display:flex; flex-direction:column; gap:6px;">
-          <button id="pnlQuickAddRoom" class="btn-subtle">+ Draw New Room</button>
-          <button id="pnlOpenSmart" class="btn-subtle">📐 Optimize Layouts</button>
+        <div style="margin-top:14px; display:flex; flex-direction:column; gap:6px;">
+          <button id="pnlQuickAddRoom" class="btn-outline">+ Draw Room</button>
         </div>
       `;
 
       $('pnlQuickAddRoom')?.addEventListener('click', () => setTool('room'));
-      $('pnlOpenSmart')?.addEventListener('click', () => {
-        document.querySelector('[data-sbtab="smart"]').click();
-      });
     }
   }
 }
@@ -1131,22 +1169,22 @@ function openProjectDetailsModal() {
           <button id="modalClose">✕</button>
         </div>
         <div class="modal-tabs">
-          <button class="modal-tab-btn ${currentTab === 'budget' ? 'on' : ''}" data-mtab="budget">💰 Budget Planner</button>
+          <button class="modal-tab-btn ${currentTab === 'budget' ? 'on' : ''}" data-mtab="budget">💰 Interior Budget</button>
           <button class="modal-tab-btn ${currentTab === 'variations' ? 'on' : ''}" data-mtab="variations">📁 Portfolio &amp; Variations</button>
           <button class="modal-tab-btn ${currentTab === 'floors' ? 'on' : ''}" data-mtab="floors">🏢 Building Levels (${floors.length})</button>
         </div>
         <div class="modal-body">
           ${currentTab === 'budget' ? `
-            <div style="background:#f4eee2; padding:12px; border-radius:8px; margin-bottom:14px; text-align:center;">
-              <span style="font-size:11px; font-weight:700; color:var(--wood); text-transform:uppercase;">Overall Projected Interior Cost</span>
-              <h2 style="font:700 24px ui-serif, Georgia, serif; color:var(--ink); margin:4px 0;">₹${budget.totalEstimatedBudget.toLocaleString('en-IN')}</h2>
-              <div style="font-size:11.5px; color:var(--muted);">
+            <div style="background:var(--bg-subtle); padding:12px; border-radius:8px; margin-bottom:14px; text-align:center;">
+              <div class="section-title">Estimated Interior Cost</div>
+              <h2 style="font-size:22px; font-weight:700; color:var(--text-primary); margin:3px 0;">₹${budget.totalEstimatedBudget.toLocaleString('en-IN')}</h2>
+              <div style="font-size:11.5px; color:var(--text-muted);">
                 ₹${budget.costPerM2.toLocaleString('en-IN')} / m² · ₹${budget.costPerSqFt.toLocaleString('en-IN')} / sq.ft (${budget.totalFloorAreaM2.toFixed(1)} m² built-up)
               </div>
             </div>
 
-            <h4>Category-Wise Breakdown</h4>
-            <div style="margin-bottom:16px;">
+            <div class="section-title">Category Breakdown</div>
+            <div style="margin:8px 0 16px;">
               ${budget.categories.map(c => `
                 <div class="score-bar-group">
                   <div class="score-bar-label">
@@ -1160,12 +1198,12 @@ function openProjectDetailsModal() {
               `).join('')}
             </div>
 
-            <h4>Itemized Pieces (${budget.itemizedFurn.length})</h4>
-            <div style="max-height:160px; overflow-y:auto; border:1px solid var(--line); border-radius:6px; background:#fff;">
+            <div class="section-title">Itemized Furniture (${budget.itemizedFurn.length})</div>
+            <div style="max-height:160px; overflow-y:auto; border:1px solid var(--border-subtle); border-radius:6px; background:#fff; margin-top:6px;">
               <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
                 <tbody>
                   ${budget.itemizedFurn.map(f => `
-                    <tr style="border-bottom:1px solid var(--line);">
+                    <tr style="border-bottom:1px solid var(--border-subtle);">
                       <td style="padding:6px 8px;">${f.label} (×${f.count})</td>
                       <td style="padding:6px 8px; text-align:right; font-weight:600;">₹${f.total.toLocaleString('en-IN')}</td>
                     </tr>
@@ -1173,51 +1211,48 @@ function openProjectDetailsModal() {
                 </tbody>
               </table>
             </div>
-            <p style="font-size:10.5px; color:var(--muted); margin-top:8px; font-style:italic;">
-              Unit rates based on standard Indian interior market benchmarks. Not a live contractual quotation.
-            </p>
           ` : currentTab === 'variations' ? `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <p class="section-desc">Save multiple design iterations and restore them with one click:</p>
-              <button id="btnSaveVarNow" class="btn-primary" style="font-size:11.5px;">+ Save Current Design</button>
+              <div class="section-hint">Save design versions and restore anytime:</div>
+              <button id="btnSaveVarNow" class="btn-primary" style="font-size:11px;">+ Save Current</button>
             </div>
 
-            <div style="display:flex; flex-direction:column; gap:8px;">
-              ${variations.length === 0 ? '<p class="section-desc">No variations saved yet.</p>' : variations.map(v => `
-                <div style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${variations.length === 0 ? '<div class="section-hint">No variations saved yet.</div>' : variations.map(v => `
+                <div style="background:#fff; border:1px solid var(--border-subtle); border-radius:6px; padding:9px; display:flex; justify-content:space-between; align-items:center;">
                   <div>
                     <b>${esc(v.name)}</b>
-                    <div style="font-size:11px; color:var(--muted);">${v.timestamp || ''} · ${v.roomsCount || 0} rooms</div>
+                    <div style="font-size:10.5px; color:var(--text-muted);">${v.timestamp || ''} · ${v.roomsCount || 0} rooms</div>
                   </div>
                   <div style="display:flex; gap:6px;">
                     <button class="btn-primary btn-modal-restore-var" data-vid="${v.id}" style="font-size:11px;">Restore</button>
-                    <button class="danger btn-modal-del-var" data-vid="${v.id}" style="font-size:11px;">Delete</button>
+                    <button class="btn-danger btn-modal-del-var" data-vid="${v.id}" style="font-size:11px;">Delete</button>
                   </div>
                 </div>
               `).join('')}
             </div>
           ` : `
-            <p class="section-desc">Manage multi-floor building levels and heights:</p>
-            <div style="display:flex; flex-direction:column; gap:8px; margin:10px 0;">
+            <div class="section-hint">Multi-floor levels and architectural elevations:</div>
+            <div style="display:flex; flex-direction:column; gap:6px; margin:10px 0;">
               ${floors.map(f => {
                 const isCurrent = f.id === home.currentFloorId;
                 return `
-                  <div style="background:#fff; border:1px solid ${isCurrent ? 'var(--wood)' : 'var(--line)'}; border-radius:8px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
+                  <div style="background:#fff; border:1px solid ${isCurrent ? 'var(--accent-wood)' : 'var(--border-subtle)'}; border-radius:6px; padding:9px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
-                      <b style="color:${isCurrent ? 'var(--wood)' : 'var(--ink)'};">${esc(f.name)}</b>
-                      <div style="font-size:11px; color:var(--muted);">Elevation: ${(f.elevation / 100).toFixed(1)}m · Height: ${(f.height / 100).toFixed(1)}m</div>
+                      <b style="color:${isCurrent ? 'var(--accent-wood)' : 'var(--text-primary)'};">${esc(f.name)}</b>
+                      <div style="font-size:10.5px; color:var(--text-muted);">Elevation: ${(f.elevation / 100).toFixed(1)}m · Height: ${(f.height / 100).toFixed(1)}m</div>
                     </div>
                     <div style="display:flex; gap:6px;">
                       <button class="btn-modal-switch-floor ${isCurrent ? 'btn-primary' : ''}" data-fid="${f.id}" style="font-size:11px;">
                         ${isCurrent ? 'Active Level' : 'Switch'}
                       </button>
-                      ${floors.length > 1 ? `<button class="danger btn-modal-del-floor" data-fid="${f.id}" style="font-size:11px;">Delete</button>` : ''}
+                      ${floors.length > 1 ? `<button class="btn-danger btn-modal-del-floor" data-fid="${f.id}" style="font-size:11px;">Delete</button>` : ''}
                     </div>
                   </div>
                 `;
               }).join('')}
             </div>
-            <div class="btns">
+            <div class="btn-row">
               <button id="btnModalAddFloor" class="btn-primary">+ Add New Level</button>
               <button id="btnModalAddStairs">Insert Staircase</button>
             </div>
@@ -1301,27 +1336,27 @@ $('btnExport').onclick = () => {
   modalContainer.hidden = false;
   modalContainer.className = 'modal-backdrop';
   modalContainer.innerHTML = `
-    <div class="modal-window" style="max-width:520px;">
+    <div class="modal-window" style="max-width:480px;">
       <div class="modal-header">
         <h3>Export Project</h3>
         <button id="modalClose">✕</button>
       </div>
-      <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
-        <button id="expPng2D" class="btn-subtle" style="padding:10px;">
-          <b>📷 High-Resolution Floor Plan (PNG)</b>
-          <div style="font-size:11px; color:var(--muted);">Export crisp 2D drawing of current floor</div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:8px;">
+        <button id="expPng2D" class="btn-subtle">
+          <b>📷 Floor Plan Image (PNG)</b>
+          <small>Export clean 2D plan drawing</small>
         </button>
-        <button id="expPng3D" class="btn-subtle" style="padding:10px;">
-          <b>🖼️ High-Resolution 3D Render (PNG)</b>
-          <div style="font-size:11px; color:var(--muted);">Capture current 3D perspective with realistic lighting</div>
+        <button id="expPng3D" class="btn-subtle">
+          <b>🖼️ High-Res 3D Studio Render (PNG)</b>
+          <small>Capture current 3D perspective with realistic shadows</small>
         </button>
-        <button id="expCad" class="btn-subtle" style="padding:10px;">
-          <b>📐 Technical CAD Blueprint (PNG)</b>
-          <div style="font-size:11px; color:var(--muted);">Export architectural drawing with dimension strings and scale bar</div>
+        <button id="expCad" class="btn-subtle">
+          <b>📐 Architectural Blueprint CAD (PNG)</b>
+          <small>Technical drawing with dimension strings and scale indicator</small>
         </button>
-        <button id="expJson" class="btn-subtle" style="padding:10px;">
-          <b>💾 Project JSON File</b>
-          <div style="font-size:11px; color:var(--muted);">Save complete editable project data to open anytime</div>
+        <button id="expJson" class="btn-subtle">
+          <b>💾 Project Data (JSON)</b>
+          <small>Save full project data to reopen anytime</small>
         </button>
       </div>
       <div class="modal-footer">
@@ -1429,14 +1464,14 @@ document.addEventListener('click', e => {
     setTool(t.dataset.tool);
   } else if (t.dataset.cat) {
     currentFurnCategory = t.dataset.cat;
-    renderFurnitureTab();
+    renderFurniturePanel();
   }
 });
 
 // ---------------- Initialize Application ----------------
 initModules();
-renderFurnitureTab();
-renderDesignStylesTab();
+renderFurniturePanel();
+renderDesignStylesPanel();
 setTool('select');
 setView('2d');
 commit();

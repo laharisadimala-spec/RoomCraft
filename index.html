@@ -3,132 +3,217 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RoomCraft — Virtual Home Designer</title>
+  <title>RoomCraft — Professional Interior Design Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
-  <!-- Top Navigation (Clean, minimal, uncluttered) -->
+  <!-- Clean Top Navigation Bar -->
   <header>
-    <div class="brand-group">
-      <div class="brand">RoomCraft</div>
-      <span class="badge-sub">Studio</span>
+    <div class="nav-left">
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          <polyline points="9 22 9 12 15 12 15 22"/>
+        </svg>
+        <span class="brand-name">RoomCraft</span>
+      </div>
+      <div class="divider-v"></div>
+      <input id="name" aria-label="Project name" value="My home" title="Click to rename project">
+      <span id="saveStatus" class="save-status">✓ Saved</span>
     </div>
 
-    <input id="name" aria-label="Project name" value="My home" title="Click to rename project">
-    <span id="saveStatus" class="save-status">✓ Saved</span>
-
-    <div class="grow"></div>
-
-    <!-- Undo / Redo -->
-    <div class="history-group">
-      <button id="undo" title="Undo (Ctrl+Z)">↶</button>
-      <button id="redo" title="Redo (Ctrl+Y)">↷</button>
+    <div class="nav-center">
+      <!-- 3 Primary Workspace Modes -->
+      <div class="seg" role="tablist">
+        <button id="mode2" class="on" title="2D Floor Planner">2D Plan</button>
+        <button id="mode3" title="3D Interior Studio">3D Studio</button>
+        <button id="modeWalk" title="First-Person Walkthrough (WASD)">Walkthrough</button>
+      </div>
     </div>
 
-    <!-- The 3 Primary Workspace Modes -->
-    <div class="seg" role="tablist">
-      <button id="mode2" class="on" title="2D Floor Planner">2D Planner</button>
-      <button id="mode3" title="3D Interior Studio">3D Studio</button>
-      <button id="modeWalk" title="First-Person Walkthrough (WASD)">Walkthrough</button>
-    </div>
+    <div class="nav-right">
+      <div class="btn-group-history">
+        <button id="undo" class="btn-icon" title="Undo (Ctrl+Z)" aria-label="Undo">
+          <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+        </button>
+        <button id="redo" class="btn-icon" title="Redo (Ctrl+Y)" aria-label="Redo">
+          <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"/></svg>
+        </button>
+      </div>
 
-    <div class="grow"></div>
+      <div class="divider-v"></div>
 
-    <!-- Header Actions -->
-    <div class="nav-actions">
-      <button id="btnPreview" class="btn-primary" title="Launch Fullscreen Presentation Tour">▶ Preview</button>
-      <button id="btnExport" title="Export Image, Blueprint or File">Export</button>
-      <button id="btnSaveDetails" title="Save Project & View Details">Save &amp; Details</button>
+      <button id="btnPreview" class="btn-outline" title="Launch Fullscreen Presentation Tour">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <span>Preview</span>
+      </button>
+
+      <button id="btnExport" class="btn-outline" title="Export Image, Blueprint or File">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>Export</span>
+      </button>
+
+      <button id="btnSaveDetails" class="btn-primary" title="Project Details &amp; Budget">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        <span>Project Details</span>
+      </button>
     </div>
   </header>
 
-  <!-- Main Workspace Sidebar (Organized into 4 clear functional tabs) -->
-  <aside class="left">
-    <div class="sidebar-tabs" role="tablist">
-      <button class="sb-tab on" data-sbtab="rooms">Rooms &amp; Walls</button>
-      <button class="sb-tab" data-sbtab="furniture">Furniture</button>
-      <button class="sb-tab" data-sbtab="design">Design &amp; Styles</button>
-      <button class="sb-tab" data-sbtab="smart">Smart Tools</button>
+  <!-- Left Sidebar (Collapsible with 4 Categories: Rooms, Furniture, Design, Smart Tools) -->
+  <aside id="sidebarLeft" class="sidebar-left">
+    <div class="sidebar-nav">
+      <button class="sb-category-btn on" data-cat="rooms">
+        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M3 9h6"/></svg>
+        <span>Rooms</span>
+      </button>
+      <button class="sb-category-btn" data-cat="furniture">
+        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M4 17v4"/><path d="M20 17v4"/><path d="M2 13h20"/></svg>
+        <span>Furniture</span>
+      </button>
+      <button class="sb-category-btn" data-cat="design">
+        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+        <span>Design</span>
+      </button>
+      <button class="sb-category-btn" data-cat="smart">
+        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <span>Smart Tools</span>
+      </button>
     </div>
 
-    <!-- Tab 1: Rooms & Walls -->
-    <div id="tabRooms" class="sb-tab-content">
-      <h4>Wall &amp; Room Tools</h4>
-      <div class="tool-group">
-        <button class="item on" data-tool="select">Select &amp; Move <small>V</small></button>
-        <button class="item" data-tool="room">Draw Room <small>R</small></button>
-        <button class="item" data-tool="door">Add Door <small>D</small></button>
-        <button class="item" data-tool="window">Add Window <small>W</small></button>
+    <!-- Category A: Rooms & Walls -->
+    <div id="panelRooms" class="sidebar-panel-body">
+      <div class="panel-section">
+        <div class="section-title">Wall &amp; Room Tools</div>
+        <div class="grid-2">
+          <button class="tool-btn on" data-tool="select">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 3l7 18 3-7 7-3L3 3z"/></svg>
+            <span>Select &amp; Move <small>V</small></span>
+          </button>
+          <button class="tool-btn" data-tool="room">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+            <span>Draw Room <small>R</small></span>
+          </button>
+          <button class="tool-btn" data-tool="door">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 21h18"/><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><circle cx="15" cy="12" r="1"/></svg>
+            <span>Add Door <small>D</small></span>
+          </button>
+          <button class="tool-btn" data-tool="window">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+            <span>Add Window <small>W</small></span>
+          </button>
+        </div>
       </div>
 
-      <h4>Rooms on this Floor</h4>
-      <div id="roomList"></div>
+      <div class="panel-section">
+        <div class="section-title">Rooms on Current Level</div>
+        <div id="roomList" class="room-list"></div>
+      </div>
 
-      <h4>Starter Layouts</h4>
-      <div class="starter-templates">
-        <button id="tplShowcase" class="btn-subtle">🌟 Skyline Penthouse Showcase</button>
-        <button id="tpl2bhk" class="btn-subtle">🏠 Contemporary 2BHK Layout</button>
-        <button id="newBlank" class="btn-subtle">📄 Blank Canvas</button>
+      <div class="panel-section">
+        <div class="section-title">Starter Layouts</div>
+        <div class="starter-group">
+          <button id="tplShowcase" class="btn-subtle">
+            <b>🌟 Skyline Penthouse</b>
+            <small>Multi-room duplex showcase</small>
+          </button>
+          <button id="tpl2bhk" class="btn-subtle">
+            <b>🏠 Contemporary 2BHK</b>
+            <small>Living, kitchen, 2 bedrooms</small>
+          </button>
+          <button id="newBlank" class="btn-subtle">
+            <b>📄 Blank Canvas</b>
+            <small>Clean architectural workspace</small>
+          </button>
+        </div>
       </div>
     </div>
 
-    <!-- Tab 2: Furniture Library -->
-    <div id="tabFurniture" class="sb-tab-content" hidden>
-      <div class="furn-cat-pills" id="furnCatTabs"></div>
+    <!-- Category B: Furniture Library -->
+    <div id="panelFurniture" class="sidebar-panel-body" hidden>
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="furnSearch" type="text" placeholder="Search furniture...">
+      </div>
+      <div class="furn-pill-row" id="furnCatTabs"></div>
       <div class="furn-grid" id="furnList"></div>
     </div>
 
-    <!-- Tab 3: Design & Materials (Combined Design Studio) -->
-    <div id="tabDesign" class="sb-tab-content" hidden>
-      <p class="section-desc">Select an architectural style to transform colors, materials, and lighting in one click:</p>
-      <div id="designStylesGrid" class="design-styles-grid"></div>
+    <!-- Category C: Design & Materials -->
+    <div id="panelDesign" class="sidebar-panel-body" hidden>
+      <div class="panel-section">
+        <div class="section-title">Interior Architectural Styles</div>
+        <div class="section-hint">Apply a cohesive style to colors, materials, and lighting:</div>
+        <div id="designStylesGrid" class="design-styles-grid"></div>
+      </div>
 
-      <div style="margin-top:14px;">
-        <button id="btnViewMoodboard" class="btn-secondary" style="width:100%;">View Room Moodboard Card</button>
+      <div class="panel-section">
+        <button id="btnViewMoodboard" class="btn-outline" style="width:100%; justify-content:center;">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <span>View Room Moodboard Card</span>
+        </button>
       </div>
     </div>
 
-    <!-- Tab 4: Smart Tools (Combined Layout Optimizer & Quality Audit) -->
-    <div id="tabSmart" class="sb-tab-content" hidden>
+    <!-- Category D: Smart Tools -->
+    <div id="panelSmart" class="sidebar-panel-body" hidden>
       <div id="smartToolsContainer"></div>
     </div>
+
+    <!-- Collapse Left Sidebar Toggle -->
+    <button id="btnToggleLeftSidebar" class="sidebar-collapse-tab left" title="Collapse Left Sidebar">◀</button>
   </aside>
 
-  <!-- Center Main Viewport -->
-  <main>
+  <!-- Central Workspace Canvas -->
+  <main id="mainWorkspace">
     <canvas id="plan"></canvas>
     <canvas id="three" hidden></canvas>
     <canvas id="blueprint" hidden></canvas>
 
-    <!-- 2D View Option: Blueprint CAD Toggle Pill -->
-    <div id="planViewToggle" class="canvas-floating-pill">
-      <button id="btnPlanStandard" class="on">Standard Plan</button>
-      <button id="btnPlanBlueprint">Technical Blueprint CAD</button>
+    <!-- 2D Minimal Floating Controls -->
+    <div id="floatingPlanBar" class="floating-dock top">
+      <div class="seg compact" role="tablist">
+        <button id="btnPlanStandard" class="on">Floor Plan</button>
+        <button id="btnPlanBlueprint">Blueprint CAD</button>
+      </div>
+      <div class="divider-dock"></div>
+      <button id="btnFitPlan" class="btn-dock-icon" title="Fit Plan to View">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+      </button>
+      <button id="btnZoomIn" class="btn-dock-icon" title="Zoom In">+</button>
+      <button id="btnZoomOut" class="btn-dock-icon" title="Zoom Out">−</button>
     </div>
 
-    <!-- 3D Studio Floating Quick Dock (Lighting & Exploded View) -->
-    <div id="dock3D" class="dock-3d" hidden>
-      <div class="dock-3d-item">
-        <label>Ambiance:</label>
+    <!-- 3D Studio Minimal Floating Controls -->
+    <div id="dock3D" class="floating-dock bottom" hidden>
+      <div class="dock-item">
+        <span class="dock-label">Ambiance:</span>
         <select id="dockLightingPreset">
           <option value="afternoon">Afternoon Daylight</option>
           <option value="morning">Morning Golden Sun</option>
           <option value="sunset">Sunset Golden Hour</option>
-          <option value="night">Cozy Night Mode</option>
+          <option value="night">Cozy Night Ambiance</option>
         </select>
       </div>
-      <div class="dock-divider"></div>
-      <button id="btnDockExploded">💥 Exploded View</button>
-      <button id="btnDockResetCam">Reset Camera</button>
+      <div class="divider-dock"></div>
+      <button id="btnDockExploded" class="btn-dock">
+        <span>💥 Exploded View</span>
+      </button>
+      <button id="btnDockResetCam" class="btn-dock">
+        <span>Reset Camera</span>
+      </button>
     </div>
 
     <!-- Exploded 3D Slider Dock -->
-    <div id="explodedOverlay" class="exploded-slider-overlay" hidden>
-      <label for="explodedSlider">Explosion Distance:</label>
+    <div id="explodedOverlay" class="floating-dock bottom" style="bottom:70px;" hidden>
+      <span class="dock-label">Explosion Distance:</span>
       <input type="range" id="explodedSlider" min="0" max="100" value="0">
-      <span id="explodedVal">0%</span>
-      <button id="btnExplodedToggle">Auto Animate</button>
-      <button id="btnExplodedClose">Close</button>
+      <span id="explodedVal" style="font-weight:600; min-width:32px;">0%</span>
+      <button id="btnExplodedToggle" class="btn-dock">Auto Animate</button>
+      <button id="btnExplodedClose" class="btn-dock">✕</button>
     </div>
 
     <!-- Walkthrough HUD Overlay -->
@@ -136,10 +221,10 @@
       <div class="walk-hud-top">
         <div class="walk-room-badge">
           <h2 id="walkCurrentRoom">Grand Living Room</h2>
-          <p>Walking height 1.6m · Apartment Walkthrough</p>
+          <p>Walking height 1.6m · Eye-level apartment exploration</p>
         </div>
         <div class="walk-minimap-box">
-          <canvas id="walkMinimap" width="150" height="150"></canvas>
+          <canvas id="walkMinimap" width="140" height="140"></canvas>
         </div>
       </div>
       <div class="walk-hud-bottom">
@@ -147,11 +232,11 @@
           ⌨️ <b>WASD</b> / Arrows to Walk · <b>Mouse</b> Look · <b>Shift</b> Sprint · <b>ESC</b> Exit
         </div>
         <div class="walk-btns">
-          <button id="walkPrevRoom">◀ Prev</button>
+          <button id="walkPrevRoom" class="btn-dock">◀ Prev</button>
           <button id="walkTourToggle" class="btn-primary">▶ Auto-Tour</button>
-          <button id="walkNextRoom">Next ▶</button>
-          <button id="walkReset">Reset</button>
-          <button id="walkExit" class="danger">Exit Walkthrough ✕</button>
+          <button id="walkNextRoom" class="btn-dock">Next ▶</button>
+          <button id="walkReset" class="btn-dock">Reset</button>
+          <button id="walkExit" class="btn-danger">Exit Walkthrough ✕</button>
         </div>
       </div>
     </div>
@@ -159,43 +244,49 @@
     <!-- Presentation Mode HUD Overlay -->
     <div id="presHud" class="pres-hud" hidden>
       <div class="pres-hud-top">
-        <div class="pres-brand-tag">RoomCraft — Design Showcase</div>
-        <button id="presExit" class="danger" style="background:#fff;">Exit Presentation (ESC) ✕</button>
+        <div class="pres-brand-tag">RoomCraft — Showcase Mode</div>
+        <button id="presExit" class="btn-danger">Exit Presentation (ESC) ✕</button>
       </div>
       <div class="pres-hud-center-bottom">
         <div class="pres-card">
           <h2 id="presRoomName">Grand Salon &amp; Foyer</h2>
           <div id="presRoomMeta" class="pres-meta">Area: 24.8 m² · Dimensions: 5.20m × 4.80m</div>
           <div id="presRoomDesc" class="pres-desc">
-            Architectural interior layout with optimized clearances, curated materials, and realistic lighting diffusion.
+            Curated architectural design with optimal clearances, authentic materials, and realistic solar lighting.
           </div>
         </div>
         <div class="pres-toolbar">
-          <button id="presPrev">◀ Prev Room</button>
+          <button id="presPrev" class="btn-dock">◀ Prev Room</button>
           <button id="presPlayToggle" class="btn-primary">⏸ Pause Tour</button>
-          <button id="presNext">Next Room ▶</button>
+          <button id="presNext" class="btn-dock">Next Room ▶</button>
         </div>
       </div>
     </div>
   </main>
 
-  <!-- Contextual Properties Sidebar (Right) -->
-  <aside class="right">
-    <div class="panel-header">
-      <h3 id="panelTitle">Contextual Properties</h3>
+  <!-- Right Properties Inspector (Contextual) -->
+  <aside id="sidebarRight" class="sidebar-right">
+    <div class="inspector-header">
+      <h3 id="panelTitle">Properties</h3>
     </div>
-    <div id="panel"></div>
+    <div id="panel" class="inspector-body"></div>
+
+    <!-- Collapse Right Sidebar Toggle -->
+    <button id="btnToggleRightSidebar" class="sidebar-collapse-tab right" title="Collapse Right Sidebar">▶</button>
   </aside>
 
-  <!-- Bottom Minimal Status Bar -->
+  <!-- Minimal Bottom Status Bar -->
   <footer>
-    <span class="hint">Space + Drag to pan · Scroll to zoom · R rotates · Delete removes · Ctrl+Z undo</span>
-    <div class="grow"></div>
-    <button id="btnFooterDetails" class="footer-details-btn">
-      <span id="footerScoreBadge" class="footer-badge">Score: 92/100</span>
-      <span id="footerBudgetBadge" class="footer-badge">Est. ₹3,84,000</span>
-      <span style="font-weight:600; color:var(--wood);">Project Details &amp; Budget ↗</span>
-    </button>
+    <div class="footer-left">
+      <span class="footer-hint">Space + Drag to pan · Scroll to zoom · R rotates · Delete removes · Ctrl+Z undo</span>
+    </div>
+    <div class="footer-right">
+      <button id="btnFooterDetails" class="footer-details-btn">
+        <span id="footerScoreBadge" class="footer-badge score">Score: 92/100</span>
+        <span id="footerBudgetBadge" class="footer-badge budget">Est. ₹3,84,000</span>
+        <span class="footer-link">Details &amp; Budget ↗</span>
+      </button>
+    </div>
   </footer>
 
   <!-- Modal Container for Project Details, Export, and Moodboards -->
